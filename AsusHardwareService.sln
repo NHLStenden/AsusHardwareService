@@ -1,0 +1,24 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AsusHardwareService", "AsusHardwareService.csproj", "{00A1E609-1B16-EDF2-8C50-36292676860D}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{00A1E609-1B16-EDF2-8C50-36292676860D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{00A1E609-1B16-EDF2-8C50-36292676860D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{00A1E609-1B16-EDF2-8C50-36292676860D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{00A1E609-1B16-EDF2-8C50-36292676860D}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {FF9768DA-4459-49F4-83D9-1842C8AAF0FE}
+	EndGlobalSection
+EndGlobal
