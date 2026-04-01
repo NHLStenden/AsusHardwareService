@@ -135,19 +135,19 @@ public sealed class ColorProfileApplier
 
         if (!InvokeSplendidInSession(sessionId, executablePath, (int)SplendidVisual.Init))
             return false;
-        await Task.Delay(300);
+        await Task.Delay(_options.ColorProfileCommandDelay);
 
         // First some default settings
         if (!InvokeSplendidInSession(sessionId, executablePath, (int)SplendidVisual.GamutMode, 0, (int)SplendidGamut.Native))
             return false;
-        await Task.Delay(300);
+        await Task.Delay(_options.ColorProfileCommandDelay);
         if (!InvokeSplendidInSession(sessionId, executablePath, (int)SplendidVisual.Default, 0, DefaultIntensity))
             return false;
-        await Task.Delay(300);
+        await Task.Delay(_options.ColorProfileCommandDelay);
 
         if (!InvokeSplendidInSession(sessionId, executablePath, (int)SplendidVisual.GamutMode, 0, (int)_options.GamutMode))
             return false;
-        await Task.Delay(300);
+        await Task.Delay(_options.ColorProfileCommandDelay);
 
         if (!InvokeSplendidInSession(sessionId, executablePath, (int)_options.VisualMode, 0, _options.ColorTemperature))
             return false;

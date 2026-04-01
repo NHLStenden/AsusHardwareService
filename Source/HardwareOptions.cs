@@ -63,5 +63,9 @@ public sealed class HardwareOptions
     /// <summary>
     /// Gets or sets the delay, in milliseconds, before applying the color profile.
     /// </summary>
-    public int ColorProfileDelay { get; set; } = 5000;
+    public int ColorProfileDelay { get; set; } = 1000;
+    /// <summary>
+    /// Gets or sets the delay, in milliseconds, before calling the Splendid.exe command.
+    /// </summary>
+    public int ColorProfileCommandDelay { get; set; } = 500;
 }
