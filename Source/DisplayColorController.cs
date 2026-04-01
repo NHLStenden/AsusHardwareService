@@ -125,7 +125,7 @@ public sealed class DisplayColorController
     /// <returns>
     /// <see langword="true"/> if the full sequence completed successfully; otherwise, <see langword="false"/>.
     /// </returns>
-    public bool ApplySequence(int sessionId)
+    public async Task<bool> ApplySequenceAsync(int sessionId)
     {
         string? executablePath = TryGetSplendidExePath();
         if (string.IsNullOrWhiteSpace(executablePath))
@@ -135,19 +135,19 @@ public sealed class DisplayColorController
 
         if (!InvokeSplendidInSession(sessionId, executablePath, (int)SplendidVisual.Init))
             return false;
-        Thread.Sleep(300);
+        await Task.Delay(300);
 
         // First some default settings
         if (!InvokeSplendidInSession(sessionId, executablePath, (int)SplendidVisual.GamutMode, 0, (int)SplendidGamut.Native))
             return false;
-        Thread.Sleep(300);
+        await Task.Delay(300);
         if (!InvokeSplendidInSession(sessionId, executablePath, (int)SplendidVisual.Default, 0, DefaultIntensity))
             return false;
-        Thread.Sleep(300);
+        await Task.Delay(300);
 
         if (!InvokeSplendidInSession(sessionId, executablePath, (int)SplendidVisual.GamutMode, 0, (int)_options.GamutMode))
             return false;
-        Thread.Sleep(300);
+        await Task.Delay(300);
 
         if (!InvokeSplendidInSession(sessionId, executablePath, (int)_options.VisualMode, 0, _options.ColorTemperature))
             return false;

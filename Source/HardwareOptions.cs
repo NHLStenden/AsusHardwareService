@@ -19,17 +19,17 @@ public sealed class HardwareOptions
     /// <summary>
     /// Gets or sets the brightness step size, in percentage points, used when increasing or decreasing brightness.
     /// </summary>
-    public int BrightnessStepPercent { get; set; } = 10;
+    public int BrightnessStep { get; set; } = 10;
 
     /// <summary>
     /// Gets or sets the delay, in milliseconds, before retrying ASUS HID device discovery after a failure.
     /// </summary>
-    public int RetryDelayMs { get; set; } = 1500;
+    public int RetryDelay { get; set; } = 1500;
 
     /// <summary>
     /// Gets or sets a value indicating whether VivoBook-specific control-brightness events should be handled.
     /// </summary>
-    public bool HandleVivobookCtrlBrightnessEvents { get; set; } = true;
+    public bool HandleBrightnessHotkeys { get; set; } = true;
 
     /// <summary>
     /// Gets or sets a value indicating whether brightness changes should be broadcast to a per-user helper.

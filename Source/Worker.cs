@@ -96,8 +96,8 @@ public sealed class Worker : BackgroundService
                             _lastSessionId,
                             session.SessionId);
 
-                        Thread.Sleep(TimeSpan.FromSeconds(2));
-                        bool started = _splendid.ApplySequence(session.SessionId);
+                        await Task.Delay(TimeSpan.FromSeconds(2));
+                        bool started = await _splendid.ApplySequenceAsync(session.SessionId);
 
                         if (started)
                         {
@@ -146,14 +146,14 @@ public sealed class Worker : BackgroundService
                     _brightness.Increase();
                     break;
 
-                case 46 when _options.HandleVivobookCtrlBrightnessEvents:
+                case 46 when _options.HandleBrightnessHotkeys:
                     // VivoBook Ctrl+Fn+F4 path in the original app
-                    _brightness.Adjust(-Math.Abs(_options.BrightnessStepPercent));
+                    _brightness.Adjust(-Math.Abs(_options.BrightnessStep));
                     break;
 
-                case 47 when _options.HandleVivobookCtrlBrightnessEvents:
+                case 47 when _options.HandleBrightnessHotkeys:
                     // VivoBook Ctrl+Fn+F5 path in the original app
-                    _brightness.Adjust(Math.Abs(_options.BrightnessStepPercent));
+                    _brightness.Adjust(Math.Abs(_options.BrightnessStep));
                     break;
 
                 default:

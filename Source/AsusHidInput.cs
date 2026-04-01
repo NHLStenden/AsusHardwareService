@@ -96,9 +96,9 @@ public sealed class AsusHidInput
                 {
                     _logger.LogWarning(
                         "No ASUS HID input stream found. Retrying in {DelayMs} ms.",
-                        _options.RetryDelayMs);
+                        _options.RetryDelay);
 
-                    await Task.Delay(_options.RetryDelayMs, cancellationToken);
+                    await Task.Delay(_options.RetryDelay, cancellationToken);
                     continue;
                 }
 
@@ -163,7 +163,7 @@ public sealed class AsusHidInput
                 }
 
                 _logger.LogError(ex, "HID listener loop failed. Retrying.");
-                await Task.Delay(_options.RetryDelayMs, cancellationToken);
+                await Task.Delay(_options.RetryDelay, cancellationToken);
             }
             finally
             {

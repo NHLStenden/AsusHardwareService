@@ -126,7 +126,7 @@ public sealed class BrightnessController
     /// </summary>
     public void Increase()
     {
-        Adjust(Math.Abs(_options.BrightnessStepPercent));
+        Adjust(Math.Abs(_options.BrightnessStep));
     }
 
     /// <summary>
@@ -134,6 +134,6 @@ public sealed class BrightnessController
     /// </summary>
     public void Decrease()
     {
-        Adjust(-Math.Abs(_options.BrightnessStepPercent));
+        Adjust(-Math.Abs(_options.BrightnessStep));
     }
 }
