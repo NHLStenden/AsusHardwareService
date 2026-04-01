@@ -32,3 +32,15 @@ sc.exe create "ASUS Hardware Service" binPath= "C:\Path\To\AsusHardwareService.e
 sc.exe config "ASUS Hardware Service" DisplayName= "ASUS Hardware Service"
 sc.exe start "ASUS Hardware Service"
 ```
+
+# Contributing
+
+Contributions are welcome! Please fork the repository and submit pull requests.
+
+# License
+
+This project is licensed under the MIT License.
+
+# Acknowledgements
+
+NHL Stenden: For providing the foundational code and utilities. Martin Bosgra: Author and primary maintainer of the project.
