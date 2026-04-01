@@ -59,4 +59,9 @@ public sealed class HardwareOptions
     /// A value of 50 is neutral.
     /// </remarks>
     public int ColorTemperature { get; set; } = 50;
+
+    /// <summary>
+    /// Gets or sets the delay, in milliseconds, before applying the color profile.
+    /// </summary>
+    public int ColorProfileDelay { get; set; } = 5000;
 }

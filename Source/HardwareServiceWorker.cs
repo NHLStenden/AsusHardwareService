@@ -96,7 +96,7 @@ public sealed class HardwareServiceWorker : BackgroundService
                             _lastSessionId,
                             session.SessionId);
 
-                        await Task.Delay(TimeSpan.FromSeconds(2));
+                        await Task.Delay(_options.ColorProfileDelay);
                         bool started = await _colorProfileApplier.ApplyAsync(session.SessionId);
 
                         if (started)
