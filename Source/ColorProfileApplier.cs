@@ -98,21 +98,21 @@ public enum SplendidVisual
 /// <summary>
 /// Locates and launches ASUS Splendid display color commands inside a user session.
 /// </summary>
-public sealed class DisplayColorController
+public sealed class ColorProfileApplier
 {
     private const string DriverName = "ATKWMIACPIIO";
     private const string SplendidExecutableName = "AsusSplendid.exe";
     private const int DefaultIntensity = 50;
 
-    private readonly ILogger<DisplayColorController> _logger;
+    private readonly ILogger<ColorProfileApplier> _logger;
     private readonly HardwareOptions _options;
 
     /// <summary>
-    /// Initialises a new instance of the <see cref="DisplayColorController"/> class.
+    /// Initialises a new instance of the <see cref="ColorProfileApplier"/> class.
     /// </summary>
     /// <param name="logger">The logger used for diagnostics and errors.</param>
     /// <param name="options">The configured hardware options.</param>
-    public DisplayColorController(ILogger<DisplayColorController> logger, IOptions<HardwareOptions> options)
+    public ColorProfileApplier(ILogger<ColorProfileApplier> logger, IOptions<HardwareOptions> options)
     {
         _logger = logger;
         _options = options.Value;
@@ -125,7 +125,7 @@ public sealed class DisplayColorController
     /// <returns>
     /// <see langword="true"/> if the full sequence completed successfully; otherwise, <see langword="false"/>.
     /// </returns>
-    public async Task<bool> ApplySequenceAsync(int sessionId)
+    public async Task<bool> ApplyAsync(int sessionId)
     {
         string? executablePath = TryGetSplendidExePath();
         if (string.IsNullOrWhiteSpace(executablePath))
@@ -231,7 +231,7 @@ public sealed class DisplayColorController
             executablePath,
             arguments);
 
-        return UserSessionProcessLauncher.TryStartInSession(
+        return SessionProcessLauncher.TryStartInSession(
             sessionId,
             executablePath,
             arguments,

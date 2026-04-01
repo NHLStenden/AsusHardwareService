@@ -24,8 +24,8 @@ builder.Services.Configure<HardwareOptions>(
 builder.Services.AddTransient<AsusAcpi>();
 builder.Services.AddSingleton<AsusHidInput>();
 builder.Services.AddSingleton<BrightnessController>();
-builder.Services.AddSingleton<ChargeController>();
-builder.Services.AddSingleton<DisplayColorController>();
-builder.Services.AddHostedService<Worker>();
+builder.Services.AddSingleton<BatteryChargeLimiter>();
+builder.Services.AddSingleton<ColorProfileApplier>();
+builder.Services.AddHostedService<HardwareServiceWorker>();
 
 await builder.Build().RunAsync();

@@ -14,20 +14,20 @@ namespace AsusHardwareService;
 /// ASUS ACPI device through <see cref="AsusAcpi"/>, and applies the configured battery
 /// charge limit. It is intended to run inside the Windows service at startup.
 /// </remarks>
-public sealed class ChargeController
+public sealed class BatteryChargeLimiter
 {
-    private readonly ILogger<ChargeController> _logger;
+    private readonly ILogger<BatteryChargeLimiter> _logger;
     private readonly IServiceProvider _services;
     private readonly HardwareOptions _options;
 
     /// <summary>
-    /// Initialises a new instance of the <see cref="ChargeController"/> class.
+    /// Initialises a new instance of the <see cref="BatteryChargeLimiter"/> class.
     /// </summary>
     /// <param name="logger">The logger used for diagnostics and status messages.</param>
     /// <param name="services">The application service provider, used to resolve a transient <see cref="AsusAcpi"/> instance.</param>
     /// <param name="options">The configured hardware service options.</param>
-    public ChargeController(
-        ILogger<ChargeController> logger,
+    public BatteryChargeLimiter(
+        ILogger<BatteryChargeLimiter> logger,
         IServiceProvider services,
         IOptions<HardwareOptions> options)
     {
@@ -44,7 +44,7 @@ public sealed class ChargeController
     /// error and returns. If the ASUS ACPI service or device path is unavailable, the
     /// method also logs the problem and returns without throwing.
     /// </remarks>
-    public void SetLimit()
+    public void ApplyChargeLimit()
     {
         try
         {

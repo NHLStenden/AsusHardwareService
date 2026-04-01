@@ -11,7 +11,7 @@ namespace AsusHardwareService;
 /// This helper is intended for service scenarios where the service runs in Session 0 but needs
 /// to launch a process inside the active desktop session of a logged-in user.
 /// </remarks>
-public static class UserSessionProcessLauncher
+public static class SessionProcessLauncher
 {
     private const int CreateUnicodeEnvironment = 0x00000400;
     private const int CreateNewConsole = 0x00000010;

@@ -12,40 +12,40 @@ namespace AsusHardwareService;
 /// ASUS HID listener loop, and watches for an interactive user session. When a user
 /// session becomes available, it launches AsusSplendid.exe inside that session.
 /// </remarks>
-public sealed class Worker : BackgroundService
+public sealed class HardwareServiceWorker : BackgroundService
 {
-    private readonly ILogger<Worker> _logger;
+    private readonly ILogger<HardwareServiceWorker> _logger;
     private readonly AsusHidInput _hid;
-    private readonly BrightnessController _brightness;
-    private readonly ChargeController _charge;
-    private readonly DisplayColorController _splendid;
+    private readonly BrightnessController _brightnessController;
+    private readonly BatteryChargeLimiter _batteryChargeLimiter;
+    private readonly ColorProfileApplier _colorProfileApplier;
 
     private readonly HardwareOptions _options;
 
     private int? _lastSessionId;
 
     /// <summary>
-    /// Initialises a new instance of the <see cref="Worker"/> class.
+    /// Initialises a new instance of the <see cref="HardwareServiceWorker"/> class.
     /// </summary>
     /// <param name="logger">The logger used for lifecycle and error reporting.</param>
     /// <param name="hid">The ASUS HID input listener.</param>
-    /// <param name="brightness">The brightness controller for the built-in panel.</param>
-    /// <param name="charge">The battery charge-limit controller.</param>
-    /// <param name="splendid">The splendid controller for the color correction.</param>
+    /// <param name="brightnessController">The brightness controller for the built-in panel.</param>
+    /// <param name="batteryChargeLimiter">The battery charge limiter.</param>
+    /// <param name="colorProfileApplier">The color profile applier for the color correction.</param>
     /// <param name="options">The configured hardware service options.</param>
-    public Worker(
-        ILogger<Worker> logger,
+    public HardwareServiceWorker(
+        ILogger<HardwareServiceWorker> logger,
         AsusHidInput hid,
-        BrightnessController brightness,
-        ChargeController charge,
-        DisplayColorController splendid,
+        BrightnessController brightnessController,
+        BatteryChargeLimiter batteryChargeLimiter,
+        ColorProfileApplier colorProfileApplier,
         IOptions<HardwareOptions> options)
     {
         _logger = logger;
         _hid = hid;
-        _brightness = brightness;
-        _charge = charge;
-        _splendid = splendid;
+        _brightnessController = brightnessController;
+        _batteryChargeLimiter = batteryChargeLimiter;
+        _colorProfileApplier = colorProfileApplier;
         _options = options.Value;
     }
 
@@ -58,7 +58,7 @@ public sealed class Worker : BackgroundService
     {
         _logger.LogInformation("Service started in Session 0.");
 
-        _charge.SetLimit();
+        _batteryChargeLimiter.ApplyChargeLimit();
 
         Task hidTask = Task.Run(() => _hid.ListenAsync(HandleAsusEventAsync, stoppingToken), stoppingToken);
         Task sessionTask = MonitorUserSessionAsync(stoppingToken);
@@ -97,7 +97,7 @@ public sealed class Worker : BackgroundService
                             session.SessionId);
 
                         await Task.Delay(TimeSpan.FromSeconds(2));
-                        bool started = await _splendid.ApplySequenceAsync(session.SessionId);
+                        bool started = await _colorProfileApplier.ApplyAsync(session.SessionId);
 
                         if (started)
                         {
@@ -138,22 +138,22 @@ public sealed class Worker : BackgroundService
             {
                 case 16:
                     // Fn+F7
-                    _brightness.Decrease();
+                    _brightnessController.Decrease();
                     break;
 
                 case 32:
                     // Fn+F8
-                    _brightness.Increase();
+                    _brightnessController.Increase();
                     break;
 
                 case 46 when _options.HandleBrightnessHotkeys:
                     // VivoBook Ctrl+Fn+F4 path in the original app
-                    _brightness.Adjust(-Math.Abs(_options.BrightnessStep));
+                    _brightnessController.Adjust(-Math.Abs(_options.BrightnessStep));
                     break;
 
                 case 47 when _options.HandleBrightnessHotkeys:
                     // VivoBook Ctrl+Fn+F5 path in the original app
-                    _brightness.Adjust(Math.Abs(_options.BrightnessStep));
+                    _brightnessController.Adjust(Math.Abs(_options.BrightnessStep));
                     break;
 
                 default:
