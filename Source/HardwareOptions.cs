@@ -46,7 +46,7 @@ public sealed class HardwareOptions
     public SplendidGamut GamutMode { get; set; } = SplendidGamut.Native;
 
     /// <summary>
-    /// Gets or sets the colour temperature to apply.
+    /// Gets or sets the color temperature to apply.
     /// </summary>
     /// <remarks>
     /// Valid values typically follow the GHelper scale:

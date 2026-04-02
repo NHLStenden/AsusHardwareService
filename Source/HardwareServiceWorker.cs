@@ -1,7 +1,4 @@
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using NAudio.CoreAudioApi;
 
 namespace AsusHardwareService;
 
@@ -22,9 +19,10 @@ public sealed class HardwareServiceWorker : BackgroundService
     private const int FnPlusM5 = 56;
     private readonly ILogger<HardwareServiceWorker> _logger;
     private readonly AsusHidInput _hid;
-    private readonly BrightnessController _brightnessController;
     private readonly BatteryChargeLimiter _batteryChargeLimiter;
+    private readonly BrightnessController _brightnessController;
     private readonly ColorProfileApplier _colorProfileApplier;
+    private readonly MicController _micController;
 
     private readonly HardwareOptions _options;
 
@@ -35,23 +33,26 @@ public sealed class HardwareServiceWorker : BackgroundService
     /// </summary>
     /// <param name="logger">The logger used for lifecycle and error reporting.</param>
     /// <param name="hid">The ASUS HID input listener.</param>
-    /// <param name="brightnessController">The brightness controller for the built-in panel.</param>
     /// <param name="batteryChargeLimiter">The battery charge limiter.</param>
+    /// <param name="brightnessController">The brightness controller for the built-in panel.</param>
     /// <param name="colorProfileApplier">The color profile applier for the color correction.</param>
+    /// <param name="micController">The microphone controller.</param>
     /// <param name="options">The configured hardware service options.</param>
     public HardwareServiceWorker(
         ILogger<HardwareServiceWorker> logger,
         AsusHidInput hid,
-        BrightnessController brightnessController,
         BatteryChargeLimiter batteryChargeLimiter,
+        BrightnessController brightnessController,
         ColorProfileApplier colorProfileApplier,
+        MicController micController,
         IOptions<HardwareOptions> options)
     {
         _logger = logger;
         _hid = hid;
-        _brightnessController = brightnessController;
         _batteryChargeLimiter = batteryChargeLimiter;
+        _brightnessController = brightnessController;
         _colorProfileApplier = colorProfileApplier;
+        _micController = micController;
         _options = options.Value;
     }
 
@@ -152,7 +153,7 @@ public sealed class HardwareServiceWorker : BackgroundService
                     _brightnessController.Increase();
                     break;
                 case FnPlusM3: // Mute/unmute mic (Fn+M3)
-                    ToggleMic();
+                    _micController.Toggle();
                     break;
                 case FnPlusM4: // Turbo (Fn+M4)
                 case FnPlusM5: // Armory Crate (Fn+M5)
@@ -172,32 +173,5 @@ public sealed class HardwareServiceWorker : BackgroundService
         }
 
         return Task.CompletedTask;
-    }
-
-    /// <summary>
-    /// Toggles the built-in microphone on or off.
-    /// </summary>
-    private void ToggleMic()
-    {
-        using var enumerator = new MMDeviceEnumerator();
-        var devices = new[]
-        {
-            enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications),
-            enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Console),
-            enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Multimedia)
-        }
-        .GroupBy(d => d.ID)
-        .Select(g => g.First())
-        .ToList();
-
-        if (devices.Count == 0)
-            return;
-
-        var newMuteState = !devices[0].AudioEndpointVolume.Mute;
-        foreach (var device in devices)
-        {
-            if (device.AudioEndpointVolume.Mute != newMuteState)
-                device.AudioEndpointVolume.Mute = newMuteState;
-        }
     }
 }

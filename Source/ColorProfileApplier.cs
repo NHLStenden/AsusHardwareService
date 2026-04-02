@@ -4,7 +4,7 @@ using Microsoft.Extensions.Options;
 namespace AsusHardwareService;
 
 /// <summary>
-/// Defines the colour gamut modes supported by ASUS Splendid.
+/// Defines the color gamut modes supported by ASUS Splendid.
 /// </summary>
 public enum SplendidGamut
 {
