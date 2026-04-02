@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using NAudio.CoreAudioApi;
 
 namespace AsusHardwareService;
 
@@ -14,6 +15,11 @@ namespace AsusHardwareService;
 /// </remarks>
 public sealed class HardwareServiceWorker : BackgroundService
 {
+    private const int FnPlusF7 = 16;
+    private const int FnPlusF8 = 32;
+    private const int FnPlusM3 = 124;
+    private const int FnPlusM4 = 174;
+    private const int FnPlusM5 = 56;
     private readonly ILogger<HardwareServiceWorker> _logger;
     private readonly AsusHidInput _hid;
     private readonly BrightnessController _brightnessController;
@@ -136,26 +142,20 @@ public sealed class HardwareServiceWorker : BackgroundService
         {
             switch (eventId)
             {
-                case 16:
+                case FnPlusF7:
                     // Fn+F7
                     _brightnessController.Decrease();
                     break;
 
-                case 32:
+                case FnPlusF8:
                     // Fn+F8
                     _brightnessController.Increase();
                     break;
-
-                case 46 when _options.HandleBrightnessHotkeys:
-                    // VivoBook Ctrl+Fn+F4 path in the original app
-                    _brightnessController.Adjust(-Math.Abs(_options.BrightnessStep));
+                case FnPlusM3: // Mute/unmute mic (Fn+M3)
+                    ToggleMic();
                     break;
-
-                case 47 when _options.HandleBrightnessHotkeys:
-                    // VivoBook Ctrl+Fn+F5 path in the original app
-                    _brightnessController.Adjust(Math.Abs(_options.BrightnessStep));
-                    break;
-
+                case FnPlusM4: // Turbo (Fn+M4)
+                case FnPlusM5: // Armory Crate (Fn+M5)
                 default:
                     _logger.LogDebug(
                         "Ignoring ASUS HID event {EventId}.",
@@ -172,5 +172,32 @@ public sealed class HardwareServiceWorker : BackgroundService
         }
 
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Toggles the built-in microphone on or off.
+    /// </summary>
+    private void ToggleMic()
+    {
+        using var enumerator = new MMDeviceEnumerator();
+        var devices = new[]
+        {
+            enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications),
+            enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Console),
+            enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Multimedia)
+        }
+        .GroupBy(d => d.ID)
+        .Select(g => g.First())
+        .ToList();
+
+        if (devices.Count == 0)
+            return;
+
+        var newMuteState = !devices[0].AudioEndpointVolume.Mute;
+        foreach (var device in devices)
+        {
+            if (device.AudioEndpointVolume.Mute != newMuteState)
+                device.AudioEndpointVolume.Mute = newMuteState;
+        }
     }
 }

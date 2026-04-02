@@ -27,11 +27,6 @@ public sealed class HardwareOptions
     public int RetryDelay { get; set; } = 1500;
 
     /// <summary>
-    /// Gets or sets a value indicating whether VivoBook-specific control-brightness events should be handled.
-    /// </summary>
-    public bool HandleBrightnessHotkeys { get; set; } = true;
-
-    /// <summary>
     /// Gets or sets a value indicating whether brightness changes should be broadcast to a per-user helper.
     /// </summary>
     /// <remarks>
@@ -63,9 +58,9 @@ public sealed class HardwareOptions
     /// <summary>
     /// Gets or sets the delay, in milliseconds, before applying the color profile.
     /// </summary>
-    public int ColorProfileDelay { get; set; } = 1000;
+    public int ColorProfileDelay { get; set; } = 8000;
     /// <summary>
     /// Gets or sets the delay, in milliseconds, before calling the Splendid.exe command.
     /// </summary>
-    public int ColorProfileCommandDelay { get; set; } = 500;
+    public int ColorProfileCommandDelay { get; set; } = 1000;
 }
