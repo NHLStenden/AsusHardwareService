@@ -36,6 +36,11 @@ public sealed class HardwareOptions
     public bool BroadcastBrightnessChanges { get; set; } = true;
 
     /// <summary>
+    /// Gets or sets the flag for setting the color profile to default.
+    /// </summary>
+    public bool ColorProfileToDefault { get; set; } = false;
+
+    /// <summary>
     /// Gets or sets the visual mode to apply.
     /// </summary>
     public SplendidVisual VisualMode { get; set; } = SplendidVisual.Default;
