@@ -256,7 +256,7 @@ public sealed class HardwareServiceWorker : BackgroundService
     /// <returns>A task that completes when both mode operations have finished.</returns>
     private async Task ApplyCombinedModeAsync(PerformanceMode performanceMode, GpuMode gpuMode, CancellationToken cancellationToken)
     {
-        _logger.LogWarning("Applying combined mode {PerformanceMode}/{GpuMode}.", performanceMode, gpuMode);
+        _logger.LogInformation("Applying combined mode {PerformanceMode}/{GpuMode}.", performanceMode, gpuMode);
 
         int perfResult = await _modeGpuManager.SetPerformanceModeAsync(performanceMode, cancellationToken);
         if (perfResult != 1)
