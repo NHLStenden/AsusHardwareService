@@ -1,6 +1,6 @@
 # ASUS Hardware Service
 
-A lightweight Windows service for ASUS laptops that applies a battery charge limit, listens for ASUS hotkey events, adjusts display brightness, sets ASUS Splendid color settings, and toggles microphone mute.
+A lightweight Windows service for ASUS laptops that applies a battery charge limit, listens for ASUS hotkey events, adjusts display brightness, sets ASUS Splendid color settings, toggles microphone mute and switches between performance modes.
 
 ## What it does
 
@@ -11,6 +11,7 @@ The service runs in the background and handles a small set of ASUS-specific hard
 - adjusts built-in display brightness
 - applies ASUS Splendid display color settings
 - toggles the mute state of the microphone
+- switches between CPU and GPU performance modes
 
 This project is intended for ASUS laptops on Windows. It relies on ASUS-specific drivers and utilities such as `ATKWMIACPIIO`, `\\.\ATKACPI`, and `AsusSplendid.exe`.
 
