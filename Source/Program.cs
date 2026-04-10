@@ -18,8 +18,7 @@ builder.Logging.AddEventLog(settings =>
 builder.Logging.SetMinimumLevel(LogLevel.Information);
 builder.Logging.AddFilter<EventLogLoggerProvider>(level => level >= LogLevel.Warning);
 
-builder.Services.Configure<HardwareOptions>(
-    builder.Configuration.GetSection("Hardware"));
+builder.Services.Configure<HardwareOptions>(builder.Configuration.GetSection("Hardware"));
 
 builder.Services.AddTransient<AsusAcpi>();
 builder.Services.AddSingleton<AsusHidInput>();
@@ -27,6 +26,7 @@ builder.Services.AddSingleton<BatteryChargeLimiter>();
 builder.Services.AddSingleton<BrightnessController>();
 builder.Services.AddSingleton<ColorProfileApplier>();
 builder.Services.AddSingleton<MicController>();
+builder.Services.AddSingleton<ModeGpuManager>();
 builder.Services.AddHostedService<HardwareServiceWorker>();
 
 await builder.Build().RunAsync();

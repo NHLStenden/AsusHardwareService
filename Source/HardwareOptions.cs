@@ -1,6 +1,24 @@
 namespace AsusHardwareService;
 
 /// <summary>
+/// ASUS performance modes supported by this service.
+/// </summary>
+public enum PerformanceMode
+{
+    Balanced = 0,
+    Silent = 2
+}
+
+/// <summary>
+/// ASUS GPU modes supported by this service.
+/// </summary>
+public enum GpuMode
+{
+    Eco = 0,
+    Standard = 1
+}
+
+/// <summary>
 /// Represents configurable settings for the ASUS hardware service.
 /// </summary>
 /// <remarks>
@@ -64,8 +82,19 @@ public sealed class HardwareOptions
     /// Gets or sets the delay, in milliseconds, before applying the color profile.
     /// </summary>
     public int ColorProfileDelay { get; set; } = 8000;
+
     /// <summary>
     /// Gets or sets the delay, in milliseconds, before calling the Splendid.exe command.
     /// </summary>
     public int ColorProfileCommandDelay { get; set; } = 1000;
+
+    /// <summary>
+    /// Gets or sets the performance mode.
+    /// </summary>
+    public PerformanceMode PerformanceMode { get; set; } = PerformanceMode.Silent;
+
+    /// <summary>
+    /// Gets or sets the GPU mode.
+    /// </summary>
+    public GpuMode GpuMode { get; set; } = GpuMode.Eco;
 }
