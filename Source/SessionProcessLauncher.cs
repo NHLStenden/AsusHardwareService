@@ -16,7 +16,6 @@ public static class SessionProcessLauncher
     private const int CreateUnicodeEnvironment = 0x00000400;
     private const int CreateNewConsole = 0x00000010;
     private const int StartfUseShowWindow = 0x00000001;
-
     private const short SwHide = 0;
 
     private const uint TokenAssignPrimary = 0x0001;
@@ -93,7 +92,7 @@ public static class SessionProcessLauncher
                 throw CreateWin32Exception("WTSQueryUserToken failed.");
             }
 
-            uint tokenAccess =
+            var tokenAccess =
                 TokenAssignPrimary |
                 TokenDuplicate |
                 TokenQuery |
@@ -116,18 +115,18 @@ public static class SessionProcessLauncher
                 throw CreateWin32Exception("CreateEnvironmentBlock failed.");
             }
 
-            StartupInfo startupInfo = new()
+            var startupInfo = new StartupInfo
             {
                 cb = Marshal.SizeOf<StartupInfo>(),
                 lpDesktop = @"winsta0\default",
                 dwFlags = StartfUseShowWindow,
-                wShowWindow = SwHide
+                wShowWindow = SwHide,
             };
 
-            string commandLine = BuildCommandLine(executablePath, arguments);
-            string? workingDirectory = Path.GetDirectoryName(executablePath);
+            var commandLine = BuildCommandLine(executablePath, arguments);
+            var workingDirectory = Path.GetDirectoryName(executablePath);
 
-            bool created = CreateProcessAsUser(
+            var created = CreateProcessAsUser(
                 primaryToken,
                 null,
                 commandLine,
@@ -138,7 +137,7 @@ public static class SessionProcessLauncher
                 environmentBlock,
                 workingDirectory,
                 ref startupInfo,
-                out ProcessInformation processInfo);
+                out var processInfo);
 
             if (!created)
             {
@@ -168,40 +167,47 @@ public static class SessionProcessLauncher
         }
         finally
         {
-            if (environmentBlock != IntPtr.Zero)
-            {
-                DestroyEnvironmentBlock(environmentBlock);
-            }
-
-            if (primaryToken != IntPtr.Zero)
-            {
-                CloseHandle(primaryToken);
-            }
-
-            if (userToken != IntPtr.Zero)
-            {
-                CloseHandle(userToken);
-            }
+            CloseHandleIfNeeded(environmentBlock, static handle => DestroyEnvironmentBlock(handle));
+            CloseHandleIfNeeded(primaryToken, CloseHandle);
+            CloseHandleIfNeeded(userToken, CloseHandle);
         }
     }
 
+    /// <summary>
+    /// Builds a safe command line for <c>CreateProcessAsUser</c>.
+    /// </summary>
+    /// <param name="executablePath">The executable path to quote.</param>
+    /// <param name="arguments">Any additional command-line arguments.</param>
+    /// <returns>The combined command line.</returns>
     private static string BuildCommandLine(string executablePath, string arguments)
     {
-        string quotedPath = $"\"{executablePath}\"";
-
-        if (string.IsNullOrWhiteSpace(arguments))
-        {
-            return quotedPath;
-        }
-
-        return $"{quotedPath} {arguments}";
+        var quotedPath = $"\"{executablePath}\"";
+        return string.IsNullOrWhiteSpace(arguments) ? quotedPath : $"{quotedPath} {arguments}";
     }
 
-    private static Win32Exception CreateWin32Exception(string message)
+    /// <summary>
+    /// Creates a <see cref="Win32Exception"/> from the current last-error value.
+    /// </summary>
+    /// <param name="message">The contextual error message.</param>
+    /// <returns>The constructed exception.</returns>
+    private static Win32Exception CreateWin32Exception(string message) => new(Marshal.GetLastWin32Error(), message);
+
+    /// <summary>
+    /// Executes a native cleanup callback when a handle-like pointer is valid.
+    /// </summary>
+    /// <param name="handle">The pointer to clean up.</param>
+    /// <param name="closeAction">The cleanup callback.</param>
+    private static void CloseHandleIfNeeded(IntPtr handle, Func<IntPtr, bool> closeAction)
     {
-        return new(Marshal.GetLastWin32Error(), message);
+        if (handle != IntPtr.Zero)
+        {
+            closeAction(handle);
+        }
     }
 
+    /// <summary>
+    /// Defines the native STARTUPINFO structure used when creating a process.
+    /// </summary>
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct StartupInfo
     {
@@ -225,6 +231,9 @@ public static class SessionProcessLauncher
         public IntPtr hStdError;
     }
 
+    /// <summary>
+    /// Defines the native PROCESS_INFORMATION structure returned for a newly created process.
+    /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     private struct ProcessInformation
     {

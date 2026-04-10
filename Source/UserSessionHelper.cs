@@ -5,7 +5,7 @@ namespace AsusHardwareService;
 /// <summary>
 /// Represents an interactive Windows user session.
 /// </summary>
-public sealed class SessionInfo
+public sealed record SessionInfo
 {
     /// <summary>
     /// Gets the Windows session identifier.
@@ -53,44 +53,41 @@ public static class UserSessionHelper
     /// </returns>
     public static SessionInfo? TryGetActiveInteractiveSession()
     {
-        uint sessionId = WTSGetActiveConsoleSessionId();
+        var sessionId = WTSGetActiveConsoleSessionId();
         if (sessionId == InvalidSessionId)
         {
             return null;
         }
 
-        int activeSessionId = (int)sessionId;
-
-        WtsConnectStateClass state = QueryConnectState(activeSessionId);
-        if (state != WtsConnectStateClass.WTSActive)
+        var activeSessionId = (int)sessionId;
+        if (QueryConnectState(activeSessionId) != WtsConnectStateClass.WTSActive)
         {
             return null;
         }
 
-        string userName = QueryString(activeSessionId, WtsInfoClass.WTSUserName);
+        var userName = QueryString(activeSessionId, WtsInfoClass.WTSUserName);
         if (string.IsNullOrWhiteSpace(userName))
         {
             return null;
         }
 
-        string domain = QueryString(activeSessionId, WtsInfoClass.WTSDomainName);
-
         return new SessionInfo
         {
             SessionId = activeSessionId,
             UserName = userName,
-            Domain = domain
+            Domain = QueryString(activeSessionId, WtsInfoClass.WTSDomainName),
         };
     }
 
+    /// <summary>
+    /// Reads a Unicode string value from WTS session information.
+    /// </summary>
+    /// <param name="sessionId">The Windows session identifier.</param>
+    /// <param name="infoClass">The WTS information class to read.</param>
+    /// <returns>The resolved string value, or an empty string when unavailable.</returns>
     private static string QueryString(int sessionId, WtsInfoClass infoClass)
     {
-        if (!WTSQuerySessionInformation(
-                IntPtr.Zero,
-                sessionId,
-                infoClass,
-                out IntPtr buffer,
-                out _))
+        if (!WTSQuerySessionInformation(IntPtr.Zero, sessionId, infoClass, out var buffer, out _))
         {
             return string.Empty;
         }
@@ -105,14 +102,14 @@ public static class UserSessionHelper
         }
     }
 
+    /// <summary>
+    /// Reads the connection state for a Windows session.
+    /// </summary>
+    /// <param name="sessionId">The Windows session identifier.</param>
+    /// <returns>The resolved connection state.</returns>
     private static WtsConnectStateClass QueryConnectState(int sessionId)
     {
-        if (!WTSQuerySessionInformation(
-                IntPtr.Zero,
-                sessionId,
-                WtsInfoClass.WTSConnectState,
-                out IntPtr buffer,
-                out _))
+        if (!WTSQuerySessionInformation(IntPtr.Zero, sessionId, WtsInfoClass.WTSConnectState, out var buffer, out _))
         {
             return WtsConnectStateClass.WTSDown;
         }
@@ -127,13 +124,19 @@ public static class UserSessionHelper
         }
     }
 
+    /// <summary>
+    /// Defines the WTS session information classes used by this helper.
+    /// </summary>
     private enum WtsInfoClass
     {
         WTSUserName = 5,
         WTSDomainName = 7,
-        WTSConnectState = 8
+        WTSConnectState = 8,
     }
 
+    /// <summary>
+    /// Defines the connection states returned by the WTS API.
+    /// </summary>
     private enum WtsConnectStateClass
     {
         WTSActive,
@@ -145,6 +148,6 @@ public static class UserSessionHelper
         WTSListen,
         WTSReset,
         WTSDown,
-        WTSInit
+        WTSInit,
     }
 }

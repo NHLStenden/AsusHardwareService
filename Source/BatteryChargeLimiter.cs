@@ -16,6 +16,9 @@ namespace AsusHardwareService;
 /// </remarks>
 public sealed class BatteryChargeLimiter
 {
+    private const string AsusDriverServiceName = "ATKWMIACPIIO";
+    private static readonly TimeSpan ServiceStateTimeout = TimeSpan.FromSeconds(30);
+
     private readonly ILogger<BatteryChargeLimiter> _logger;
     private readonly IServiceProvider _services;
     private readonly HardwareOptions _options;
@@ -48,50 +51,36 @@ public sealed class BatteryChargeLimiter
     {
         try
         {
-            int limit = _options.ChargeLimit;
-
-            if (limit <= 0 || limit >= 100)
+            var limit = _options.ChargeLimit;
+            if (limit is <= 0 or >= 100)
             {
-                _logger.LogError(
-                    "No valid charge limit configured. Value: {Limit}",
-                    limit);
-
+                _logger.LogError("No valid charge limit configured. Value: {Limit}", limit);
                 return;
             }
 
-            EnsureServiceRunning("ATKWMIACPIIO");
+            EnsureServiceRunning(AsusDriverServiceName);
 
             using var acpi = _services.GetRequiredService<AsusAcpi>();
-
             if (!acpi.IsConnected)
             {
                 _logger.LogError(@"Could not connect to \\.\ATKACPI.");
                 return;
             }
 
-            _logger.LogInformation(
-                "Setting battery charge limit to {Limit}.",
-                limit);
+            _logger.LogInformation("Setting battery charge limit to {Limit}.", limit);
 
-            int result = acpi.DeviceSet(AsusAcpi.BatteryLimit, limit, "Limit");
+            var result = acpi.DeviceSet(AsusAcpi.BatteryLimit, limit, "Limit");
             if (result != 1)
             {
-                _logger.LogError(
-                    "ACPI call returned {Result}.",
-                    result);
-
+                _logger.LogError("ACPI call returned {Result}.", result);
                 return;
             }
 
-            _logger.LogInformation(
-                "Battery charge limit set to {Limit}%.",
-                limit);
+            _logger.LogInformation("Battery charge limit set to {Limit}%.", limit);
         }
         catch (Exception ex)
         {
-            _logger.LogError(
-                ex,
-                "Fatal error while setting battery charge limit.");
+            _logger.LogError(ex, "Fatal error while setting battery charge limit.");
         }
     }
 
@@ -105,156 +94,118 @@ public sealed class BatteryChargeLimiter
     private void EnsureServiceRunning(string serviceName)
     {
         using var controller = new ServiceController(serviceName);
-
-        ServiceControllerStatus GetStatus()
-        {
-            controller.Refresh();
-            return controller.Status;
-        }
-
-        var status = GetStatus();
+        var status = RefreshStatus(controller);
 
         if (status == ServiceControllerStatus.Running)
         {
-            _logger.LogInformation(
-                "Required service {ServiceName} is already running.",
-                serviceName);
-
+            _logger.LogInformation("Required service {ServiceName} is already running.", serviceName);
             return;
         }
 
         if (status == ServiceControllerStatus.StartPending)
         {
-            _logger.LogInformation(
-                "Required service {ServiceName} is already starting.",
-                serviceName);
-
-            controller.WaitForStatus(
-                ServiceControllerStatus.Running,
-                TimeSpan.FromSeconds(30));
-
-            status = GetStatus();
-
-            if (status != ServiceControllerStatus.Running)
-            {
-                throw new InvalidOperationException(
-                    $"Service {serviceName} did not reach Running state.");
-            }
-
+            _logger.LogInformation("Required service {ServiceName} is already starting.", serviceName);
+            WaitForStatus(controller, serviceName, ServiceControllerStatus.Running);
             return;
         }
 
         if (status == ServiceControllerStatus.StopPending)
         {
-            _logger.LogInformation(
-                "Waiting for service {ServiceName} to stop before starting it.",
-                serviceName);
-
-            controller.WaitForStatus(
-                ServiceControllerStatus.Stopped,
-                TimeSpan.FromSeconds(30));
-
-            status = GetStatus();
+            _logger.LogInformation("Waiting for service {ServiceName} to stop before starting it.", serviceName);
+            WaitForStatus(controller, serviceName, ServiceControllerStatus.Stopped);
+            status = RefreshStatus(controller);
         }
 
         if (status == ServiceControllerStatus.PausePending)
         {
-            _logger.LogInformation(
-                "Waiting for service {ServiceName} to finish pausing.",
-                serviceName);
-
-            controller.WaitForStatus(
-                ServiceControllerStatus.Paused,
-                TimeSpan.FromSeconds(30));
-
-            status = GetStatus();
+            _logger.LogInformation("Waiting for service {ServiceName} to finish pausing.", serviceName);
+            WaitForStatus(controller, serviceName, ServiceControllerStatus.Paused);
+            status = RefreshStatus(controller);
         }
 
         if (status == ServiceControllerStatus.ContinuePending)
         {
-            _logger.LogInformation(
-                "Waiting for service {ServiceName} to resume.",
-                serviceName);
-
-            controller.WaitForStatus(
-                ServiceControllerStatus.Running,
-                TimeSpan.FromSeconds(30));
-
-            status = GetStatus();
-
-            if (status != ServiceControllerStatus.Running)
-            {
-                throw new InvalidOperationException(
-                    $"Service {serviceName} did not reach Running state.");
-            }
-
+            _logger.LogInformation("Waiting for service {ServiceName} to resume.", serviceName);
+            WaitForStatus(controller, serviceName, ServiceControllerStatus.Running);
             return;
         }
 
         switch (status)
         {
             case ServiceControllerStatus.Stopped:
-                _logger.LogInformation(
-                    "Starting required service {ServiceName}.",
-                    serviceName);
-
-                try
-                {
-                    controller.Start();
-                }
-                catch (Win32Exception ex)
-                {
-                    _logger.LogError(ex, "{ServiceName} cannot be started.", serviceName);
-                }
-                catch (InvalidOperationException ex)
-                {
-                    _logger.LogError(ex, "{ServiceName} cannot be started.", serviceName);
-                }
+                _logger.LogInformation("Starting required service {ServiceName}.", serviceName);
+                TryControlService(serviceName, controller.Start);
                 break;
 
             case ServiceControllerStatus.Paused:
                 if (!controller.CanPauseAndContinue)
                 {
-                    throw new InvalidOperationException(
-                        $"Service {serviceName} is paused and cannot be continued.");
+                    throw new InvalidOperationException($"Service {serviceName} is paused and cannot be continued.");
                 }
 
-                _logger.LogInformation(
-                    "Continuing required service {ServiceName}.",
-                    serviceName);
-
-                try
-                {
-                    controller.Continue();
-                }
-                catch (Win32Exception ex)
-                {
-                    _logger.LogError(ex, "{ServiceName} cannot be continued.", serviceName);
-                }
-                catch (InvalidOperationException ex)
-                {
-                    _logger.LogError(ex, "{ServiceName} cannot be continued.", serviceName);
-                }
+                _logger.LogInformation("Continuing required service {ServiceName}.", serviceName);
+                TryControlService(serviceName, controller.Continue);
                 break;
 
             case ServiceControllerStatus.Running:
                 return;
 
             default:
-                throw new InvalidOperationException(
-                    $"Service {serviceName} is in unexpected state {status}.");
+                throw new InvalidOperationException($"Service {serviceName} is in unexpected state {status}.");
         }
 
-        controller.WaitForStatus(
-            ServiceControllerStatus.Running,
-            TimeSpan.FromSeconds(30));
+        WaitForStatus(controller, serviceName, ServiceControllerStatus.Running);
+    }
 
-        status = GetStatus();
+    /// <summary>
+    /// Refreshes the Windows service status and returns the latest value.
+    /// </summary>
+    /// <param name="controller">The service controller to refresh.</param>
+    /// <returns>The refreshed service status.</returns>
+    private static ServiceControllerStatus RefreshStatus(ServiceController controller)
+    {
+        controller.Refresh();
+        return controller.Status;
+    }
 
-        if (status != ServiceControllerStatus.Running)
+    /// <summary>
+    /// Waits for a Windows service to reach the expected status.
+    /// </summary>
+    /// <param name="controller">The service controller to monitor.</param>
+    /// <param name="serviceName">The name of the Windows service.</param>
+    /// <param name="expectedStatus">The target service status.</param>
+    /// <exception cref="InvalidOperationException">Thrown when the service does not reach the target status in time.</exception>
+    private static void WaitForStatus(
+        ServiceController controller,
+        string serviceName,
+        ServiceControllerStatus expectedStatus)
+    {
+        controller.WaitForStatus(expectedStatus, ServiceStateTimeout);
+
+        if (RefreshStatus(controller) != expectedStatus)
         {
-            throw new InvalidOperationException(
-                $"Service {serviceName} did not reach Running state.");
+            throw new InvalidOperationException($"Service {serviceName} did not reach {expectedStatus} state.");
+        }
+    }
+
+    /// <summary>
+    /// Executes a service control operation and logs failures with consistent diagnostics.
+    /// </summary>
+    /// <param name="serviceName">The name of the Windows service being controlled.</param>
+    /// <param name="action">The control operation to invoke.</param>
+    private void TryControlService(string serviceName, Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch (Win32Exception ex)
+        {
+            _logger.LogError(ex, "{ServiceName} cannot be controlled.", serviceName);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogError(ex, "{ServiceName} cannot be controlled.", serviceName);
         }
     }
 }

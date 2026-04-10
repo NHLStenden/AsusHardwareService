@@ -14,6 +14,13 @@ namespace AsusHardwareService;
 /// </remarks>
 public sealed class BrightnessController
 {
+    private const string WmiNamespace = @"\\.\root\wmi";
+    private const string BrightnessClassName = "WmiMonitorBrightness";
+    private const string BrightnessMethodsClassName = "WmiMonitorBrightnessMethods";
+    private const string CurrentBrightnessPropertyName = "CurrentBrightness";
+    private const string SetBrightnessMethodName = "WmiSetBrightness";
+    private const int TransitionTimeout = 1;
+
     private readonly ILogger<BrightnessController> _logger;
     private readonly HardwareOptions _options;
 
@@ -39,21 +46,14 @@ public sealed class BrightnessController
     /// </exception>
     public int Get()
     {
-        var scope = new ManagementScope(@"\\.\root\wmi");
-        scope.Connect();
-
-        using var brightnessClass = new ManagementClass(
-            scope,
-            new ManagementPath("WmiMonitorBrightness"),
-            null);
-
+        using var brightnessClass = CreateManagementClass(BrightnessClassName);
         using var instances = brightnessClass.GetInstances();
 
         foreach (ManagementObject instance in instances)
         {
             using (instance)
             {
-                return (byte)instance.GetPropertyValue("CurrentBrightness");
+                return (byte)instance.GetPropertyValue(CurrentBrightnessPropertyName);
             }
         }
 
@@ -72,32 +72,24 @@ public sealed class BrightnessController
     {
         brightness = Math.Clamp(brightness, 0, 100);
 
-        var scope = new ManagementScope(@"\\.\root\wmi");
-        scope.Connect();
-
-        using var methodsClass = new ManagementClass(
-            scope,
-            new ManagementPath("WmiMonitorBrightnessMethods"),
-            null);
-
+        using var methodsClass = CreateManagementClass(BrightnessMethodsClassName);
         using var instances = methodsClass.GetInstances();
 
-        object[] args = { 1, brightness };
-        bool changed = false;
+        object[] args = [TransitionTimeout, brightness];
+        var changed = false;
 
         foreach (ManagementObject instance in instances)
         {
             using (instance)
             {
-                instance.InvokeMethod("WmiSetBrightness", args);
+                instance.InvokeMethod(SetBrightnessMethodName, args);
                 changed = true;
             }
         }
 
         if (!changed)
         {
-            throw new InvalidOperationException(
-                "No WMI monitor brightness method instance was found.");
+            throw new InvalidOperationException("No WMI monitor brightness method instance was found.");
         }
 
         _logger.LogInformation("Brightness set to {Brightness}%.", brightness);
@@ -109,8 +101,8 @@ public sealed class BrightnessController
     /// <param name="delta">The amount to add to the current brightness. Negative values reduce brightness.</param>
     public void Adjust(int delta)
     {
-        int current = Get();
-        int next = Math.Clamp(current + delta, 0, 100);
+        var current = Get();
+        var next = Math.Clamp(current + delta, 0, 100);
 
         if (next == current)
         {
@@ -135,5 +127,18 @@ public sealed class BrightnessController
     public void Decrease()
     {
         Adjust(-Math.Abs(_options.BrightnessStep));
+    }
+
+    /// <summary>
+    /// Creates a WMI management class connected to the ASUS brightness namespace.
+    /// </summary>
+    /// <param name="className">The WMI class name to open.</param>
+    /// <returns>An initialised <see cref="ManagementClass"/> instance.</returns>
+    private static ManagementClass CreateManagementClass(string className)
+    {
+        var scope = new ManagementScope(WmiNamespace);
+        scope.Connect();
+
+        return new ManagementClass(scope, new ManagementPath(className), null);
     }
 }

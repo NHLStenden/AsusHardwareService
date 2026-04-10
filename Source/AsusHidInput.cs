@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Text;
 using HidSharp;
 using HidSharp.Reports;
@@ -28,6 +29,7 @@ public sealed class AsusHidInput
     /// </summary>
     public const byte InputReportId = 0x5a;
 
+    private const byte IgnoredEventId = 236;
     private static readonly int[] SupportedProductIds =
     {
         0x1a30,
@@ -50,6 +52,8 @@ public sealed class AsusHidInput
         0x1b2c,
         0x8854
     };
+
+    private static readonly byte[] InitialisationText = Encoding.ASCII.GetBytes("ZASUS Tech.Inc.");
 
     private readonly ILogger<AsusHidInput> _logger;
     private readonly HardwareOptions _options;
@@ -128,20 +132,13 @@ public sealed class AsusHidInput
                 while (!cancellationToken.IsCancellationRequested)
                 {
                     var data = stream.Read();
-
-                    if (data.Length > 1 &&
-                        data[0] == InputReportId &&
-                        data[1] > 0 &&
-                        data[1] != 236)
+                    if (!TryGetEventId(data, out var eventId))
                     {
-                        int eventId = data[1];
-
-                        _logger.LogInformation(
-                            "ASUS HID event: {EventId}",
-                            eventId);
-
-                        await onEvent(eventId);
+                        continue;
                     }
+
+                    _logger.LogInformation("ASUS HID event: {EventId}", eventId);
+                    await onEvent(eventId);
                 }
             }
             catch (OperationCanceledException)
@@ -150,9 +147,7 @@ public sealed class AsusHidInput
             }
             catch (ObjectDisposedException) when (cancellationToken.IsCancellationRequested)
             {
-                _logger.LogInformation(
-                    "HID stream closed because service stop was requested.");
-
+                _logger.LogInformation("HID stream closed because service stop was requested.");
                 break;
             }
             catch (Exception ex)
@@ -185,15 +180,7 @@ public sealed class AsusHidInput
         {
             try
             {
-                if (!SupportedProductIds.Contains(device.ProductID) ||
-                    !device.CanOpen ||
-                    device.GetMaxFeatureReportLength() <= 0)
-                {
-                    continue;
-                }
-
-                if (!device.GetReportDescriptor()
-                    .TryGetReport(ReportType.Feature, InputReportId, out _))
+                if (!IsSupportedInputDevice(device))
                 {
                     continue;
                 }
@@ -207,10 +194,7 @@ public sealed class AsusHidInput
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(
-                    ex,
-                    "Skipping HID device PID={Pid:X}",
-                    device.ProductID);
+                _logger.LogDebug(ex, "Skipping HID device PID={Pid:X}", device.ProductID);
             }
         }
 
@@ -226,34 +210,57 @@ public sealed class AsusHidInput
         {
             try
             {
-                if (!SupportedProductIds.Contains(device.ProductID) ||
-                    !device.CanOpen ||
-                    device.GetMaxFeatureReportLength() <= 0)
-                {
-                    continue;
-                }
-
-                if (!device.GetReportDescriptor()
-                    .TryGetReport(ReportType.Feature, InputReportId, out _))
+                if (!IsSupportedInputDevice(device))
                 {
                     continue;
                 }
 
                 using var stream = device.Open();
+                var payload = new byte[device.GetMaxFeatureReportLength()];
 
-                byte[] text = Encoding.ASCII.GetBytes("ZASUS Tech.Inc.");
-                byte[] payload = new byte[device.GetMaxFeatureReportLength()];
-
-                Array.Copy(text, payload, text.Length);
+                Array.Copy(InitialisationText, payload, InitialisationText.Length);
                 stream.SetFeature(payload);
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(
-                    ex,
-                    "Input initialisation failed for PID={Pid:X}",
-                    device.ProductID);
+                _logger.LogDebug(ex, "Input initialisation failed for PID={Pid:X}", device.ProductID);
             }
         }
+    }
+
+    /// <summary>
+    /// Determines whether a HID device matches the supported ASUS criteria for this service.
+    /// </summary>
+    /// <param name="device">The HID device to validate.</param>
+    /// <returns><see langword="true"/> when the device is supported; otherwise, <see langword="false"/>.</returns>
+    private static bool IsSupportedInputDevice(HidDevice device) =>
+        SupportedProductIds.Contains(device.ProductID) &&
+        device.CanOpen &&
+        device.GetMaxFeatureReportLength() > 0 &&
+        device.GetReportDescriptor().TryGetReport(ReportType.Feature, InputReportId, out _);
+
+    /// <summary>
+    /// Extracts a supported ASUS event identifier from a HID input report.
+    /// </summary>
+    /// <param name="data">The raw HID report bytes.</param>
+    /// <param name="eventId">Receives the resolved event identifier when successful.</param>
+    /// <returns><see langword="true"/> when the report contains a recognised event; otherwise, <see langword="false"/>.</returns>
+    private static bool TryGetEventId(byte[] data, out int eventId)
+    {
+        eventId = default;
+
+        if (data.Length <= 1 || data[0] != InputReportId)
+        {
+            return false;
+        }
+
+        var candidate = data[1];
+        if (candidate is 0 or IgnoredEventId)
+        {
+            return false;
+        }
+
+        eventId = candidate;
+        return true;
     }
 }

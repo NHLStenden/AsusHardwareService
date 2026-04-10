@@ -5,8 +5,15 @@ namespace AsusHardwareService;
 /// </summary>
 public enum PerformanceMode
 {
+    /// <summary>
+    /// Uses the balanced ASUS performance profile.
+    /// </summary>
     Balanced = 0,
-    Silent = 2
+
+    /// <summary>
+    /// Uses the silent ASUS performance profile.
+    /// </summary>
+    Silent = 2,
 }
 
 /// <summary>
@@ -14,8 +21,15 @@ public enum PerformanceMode
 /// </summary>
 public enum GpuMode
 {
+    /// <summary>
+    /// Uses the integrated GPU focused Eco mode.
+    /// </summary>
     Eco = 0,
-    Standard = 1
+
+    /// <summary>
+    /// Uses the standard hybrid GPU mode.
+    /// </summary>
+    Standard = 1,
 }
 
 /// <summary>
@@ -56,7 +70,7 @@ public sealed class HardwareOptions
     /// <summary>
     /// Gets or sets the flag for setting the color profile to default.
     /// </summary>
-    public bool ColorProfileToDefault { get; set; } = false;
+    public bool ColorProfileToDefault { get; set; }
 
     /// <summary>
     /// Gets or sets the visual mode to apply.

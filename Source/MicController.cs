@@ -8,6 +8,8 @@ namespace AsusHardwareService;
 /// </summary>
 public sealed class MicController
 {
+    private static readonly Role[] CaptureRoles = [Role.Communications, Role.Console, Role.Multimedia];
+
     private readonly ILogger<MicController> _logger;
 
     /// <summary>
@@ -26,17 +28,11 @@ public sealed class MicController
     {
         using var enumerator = new MMDeviceEnumerator();
 
-        var devices = new[]
-        {
-            TryGetDefaultAudioEndpoint(enumerator, Role.Communications),
-            TryGetDefaultAudioEndpoint(enumerator, Role.Console),
-            TryGetDefaultAudioEndpoint(enumerator, Role.Multimedia)
-        }
-        .Where(device => device is not null)
-        .Cast<MMDevice>()
-        .GroupBy(device => device.ID)
-        .Select(group => group.First())
-        .ToList();
+        var devices = CaptureRoles
+            .Select(role => TryGetDefaultAudioEndpoint(enumerator, role))
+            .OfType<MMDevice>()
+            .DistinctBy(device => device.ID)
+            .ToList();
 
         if (devices.Count == 0)
         {
@@ -44,8 +40,7 @@ public sealed class MicController
             return;
         }
 
-        bool newMuteState = !devices[0].AudioEndpointVolume.Mute;
-
+        var newMuteState = !devices[0].AudioEndpointVolume.Mute;
         foreach (var device in devices)
         {
             if (device.AudioEndpointVolume.Mute != newMuteState)
@@ -60,6 +55,12 @@ public sealed class MicController
             devices.Count);
     }
 
+    /// <summary>
+    /// Tries to resolve the default capture endpoint for the specified role.
+    /// </summary>
+    /// <param name="enumerator">The MMDevice enumerator to query.</param>
+    /// <param name="role">The Windows audio role to resolve.</param>
+    /// <returns>The matching device when available; otherwise, <see langword="null"/>.</returns>
     private MMDevice? TryGetDefaultAudioEndpoint(MMDeviceEnumerator enumerator, Role role)
     {
         try

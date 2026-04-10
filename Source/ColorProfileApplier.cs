@@ -26,7 +26,7 @@ public enum SplendidGamut
     /// <summary>
     /// Uses the Display P3 gamut.
     /// </summary>
-    DisplayP3 = 54
+    DisplayP3 = 54,
 }
 
 /// <summary>
@@ -92,7 +92,7 @@ public enum SplendidVisual
     /// <summary>
     /// Disables the visual enhancement mode.
     /// </summary>
-    Disabled = 18
+    Disabled = 18,
 }
 
 /// <summary>
@@ -127,33 +127,25 @@ public sealed class ColorProfileApplier
     /// </returns>
     public async Task<bool> ApplyAsync(int sessionId)
     {
-        string? executablePath = TryGetSplendidExePath();
+        var executablePath = TryGetSplendidExePath();
         if (string.IsNullOrWhiteSpace(executablePath))
         {
             return false;
         }
 
-        if (!InvokeSplendidInSession(sessionId, executablePath, (int)SplendidVisual.Init))
-            return false;
-        await Task.Delay(_options.ColorProfileCommandDelay);
-
-        if (_options.ColorProfileToDefault)
+        var commands = BuildCommandSequence();
+        foreach (var command in commands)
         {
-            // First some default settings
-            if (!InvokeSplendidInSession(sessionId, executablePath, (int)SplendidVisual.GamutMode, 0, (int)SplendidGamut.Native))
+            if (!InvokeSplendidInSession(sessionId, executablePath, command.Command, command.Param1, command.Param2, command.Param3))
+            {
                 return false;
-            await Task.Delay(_options.ColorProfileCommandDelay);
-            if (!InvokeSplendidInSession(sessionId, executablePath, (int)SplendidVisual.Default, 0, DefaultIntensity))
-                return false;
-            await Task.Delay(_options.ColorProfileCommandDelay);
+            }
+
+            if (command.DelayAfterCommand)
+            {
+                await Task.Delay(_options.ColorProfileCommandDelay);
+            }
         }
-
-        if (!InvokeSplendidInSession(sessionId, executablePath, (int)SplendidVisual.GamutMode, 0, (int)_options.GamutMode))
-            return false;
-        await Task.Delay(_options.ColorProfileCommandDelay);
-
-        if (!InvokeSplendidInSession(sessionId, executablePath, (int)_options.VisualMode, 0, _options.ColorTemperature))
-            return false;
 
         return true;
     }
@@ -169,33 +161,30 @@ public sealed class ColorProfileApplier
         using ManagementObjectSearcher searcher =
             new($"SELECT Name, PathName FROM Win32_SystemDriver WHERE Name = '{DriverName}'");
 
-        using ManagementObjectCollection results = searcher.Get();
-
-        ManagementObject? driver = results.Cast<ManagementObject>().FirstOrDefault();
+        using var results = searcher.Get();
+        var driver = results.Cast<ManagementObject>().FirstOrDefault();
         if (driver is null)
         {
             _logger.LogError("{DriverName} driver not found.", DriverName);
             return null;
         }
 
-        string? pathName = driver["PathName"]?.ToString();
+        var pathName = driver["PathName"]?.ToString();
         if (string.IsNullOrWhiteSpace(pathName))
         {
             _logger.LogError("{DriverName} driver path is empty.", DriverName);
             return null;
         }
 
-        string normalisedPath = pathName.Trim().Trim('"');
-        string? basePath = Path.GetDirectoryName(normalisedPath);
-
+        var normalisedPath = pathName.Trim().Trim('"');
+        var basePath = Path.GetDirectoryName(normalisedPath);
         if (string.IsNullOrWhiteSpace(basePath))
         {
             _logger.LogError("Could not determine the ASUS driver directory.");
             return null;
         }
 
-        string executablePath = Path.Combine(basePath, SplendidExecutableName);
-
+        var executablePath = Path.Combine(basePath, SplendidExecutableName);
         if (!File.Exists(executablePath))
         {
             _logger.LogError("{ExecutableName} not found at: {Path}", SplendidExecutableName, executablePath);
@@ -226,7 +215,7 @@ public sealed class ColorProfileApplier
         int? param2 = null,
         int? param3 = null)
     {
-        string arguments = BuildArguments(command, param1, param2, param3);
+        var arguments = BuildArguments(command, param1, param2, param3);
 
         _logger.LogInformation(
             "Launching ASUS Splendid in session {SessionId}: \"{ExecutablePath}\" {Arguments}",
@@ -234,11 +223,7 @@ public sealed class ColorProfileApplier
             executablePath,
             arguments);
 
-        return SessionProcessLauncher.TryStartInSession(
-            sessionId,
-            executablePath,
-            arguments,
-            _logger);
+        return SessionProcessLauncher.TryStartInSession(sessionId, executablePath, arguments, _logger);
     }
 
     /// <summary>
@@ -274,4 +259,41 @@ public sealed class ColorProfileApplier
 
         return string.Join(" ", parts);
     }
+
+    /// <summary>
+    /// Builds the ordered ASUS Splendid command sequence for the configured colour profile.
+    /// </summary>
+    /// <returns>The ordered commands to execute.</returns>
+    private IReadOnlyList<SplendidCommand> BuildCommandSequence()
+    {
+        List<SplendidCommand> commands = [
+            new((int)SplendidVisual.Init),
+        ];
+
+        if (_options.ColorProfileToDefault)
+        {
+            commands.Add(new((int)SplendidVisual.GamutMode, 0, (int)SplendidGamut.Native));
+            commands.Add(new((int)SplendidVisual.Default, 0, DefaultIntensity));
+        }
+
+        commands.Add(new((int)SplendidVisual.GamutMode, 0, (int)_options.GamutMode));
+        commands.Add(new((int)_options.VisualMode, 0, _options.ColorTemperature));
+
+        return commands;
+    }
+
+    /// <summary>
+    /// Represents a single ASUS Splendid command invocation.
+    /// </summary>
+    /// <param name="Command">The command identifier.</param>
+    /// <param name="Param1">The optional first parameter.</param>
+    /// <param name="Param2">The optional second parameter.</param>
+    /// <param name="Param3">The optional third parameter.</param>
+    /// <param name="DelayAfterCommand"><see langword="true"/> when the standard inter-command delay should be applied.</param>
+    private sealed record SplendidCommand(
+        int Command,
+        int? Param1 = null,
+        int? Param2 = null,
+        int? Param3 = null,
+        bool DelayAfterCommand = true);
 }

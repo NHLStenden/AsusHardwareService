@@ -14,14 +14,13 @@ namespace AsusHardwareService;
 /// </remarks>
 public sealed class HardwareServiceWorker : BackgroundService
 {
+    private static readonly TimeSpan SessionMonitorInterval = TimeSpan.FromSeconds(2);
+
     private const int FnPlusF7 = 16;
     private const int FnPlusF8 = 32;
     private const int FnPlusM3 = 124;
     private const int FnPlusM4 = 174;
     private const int FnPlusM5 = 56;
-
-    private PerformanceMode _performanceMode;
-    private GpuMode _gpuMode;
 
     private readonly ILogger<HardwareServiceWorker> _logger;
     private readonly AsusHidInput _hid;
@@ -33,6 +32,8 @@ public sealed class HardwareServiceWorker : BackgroundService
     private readonly HardwareOptions _options;
     private readonly SemaphoreSlim _modeLock = new(1, 1);
 
+    private PerformanceMode _performanceMode;
+    private GpuMode _gpuMode;
     private int? _lastSessionId;
 
     /// <summary>
@@ -78,8 +79,8 @@ public sealed class HardwareServiceWorker : BackgroundService
         _batteryChargeLimiter.ApplyChargeLimit();
         await RestoreModesAsync(stoppingToken);
 
-        Task hidTask = Task.Run(() => _hid.ListenAsync(HandleAsusEventAsync, stoppingToken), stoppingToken);
-        Task sessionTask = MonitorUserSessionAsync(stoppingToken);
+        var hidTask = Task.Run(() => _hid.ListenAsync(HandleAsusEventAsync, stoppingToken), stoppingToken);
+        var sessionTask = MonitorUserSessionAsync(stoppingToken);
 
         await Task.WhenAll(hidTask, sessionTask);
     }
@@ -104,14 +105,13 @@ public sealed class HardwareServiceWorker : BackgroundService
     /// <returns>A task that completes when session monitoring stops.</returns>
     private async Task MonitorUserSessionAsync(CancellationToken stoppingToken)
     {
-        using PeriodicTimer timer = new(TimeSpan.FromSeconds(2));
+        using var timer = new PeriodicTimer(SessionMonitorInterval);
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                SessionInfo? session = UserSessionHelper.TryGetActiveInteractiveSession();
-
+                var session = UserSessionHelper.TryGetActiveInteractiveSession();
                 if (session is null)
                 {
                     _logger.LogInformation("No active interactive session detected.");
@@ -127,28 +127,7 @@ public sealed class HardwareServiceWorker : BackgroundService
 
                     if (_lastSessionId != session.SessionId)
                     {
-                        _logger.LogInformation(
-                            "New session detected. Previous={PreviousSessionId}, Current={CurrentSessionId}",
-                            _lastSessionId,
-                            session.SessionId);
-
-                        await Task.Delay(_options.ColorProfileDelay, stoppingToken);
-                        bool started = await _colorProfileApplier.ApplyAsync(session.SessionId);
-
-                        if (started)
-                        {
-                            _lastSessionId = session.SessionId;
-
-                            _logger.LogInformation(
-                                "AsusSplendid launch request succeeded for session {SessionId}.",
-                                session.SessionId);
-                        }
-                        else
-                        {
-                            _logger.LogWarning(
-                                "AsusSplendid launch request failed for session {SessionId}.",
-                                session.SessionId);
-                        }
+                        await ApplyColourProfileForSessionAsync(session.SessionId, stoppingToken);
                     }
                 }
             }
@@ -209,8 +188,8 @@ public sealed class HardwareServiceWorker : BackgroundService
         await _modeLock.WaitAsync();
         try
         {
-            (PerformanceMode performanceMode, GpuMode gpuMode) current = GetCurrentCombinedMode();
-            (PerformanceMode performanceMode, GpuMode gpuMode) next = GetNextCombinedMode(current.performanceMode, current.gpuMode);
+            var current = GetCurrentCombinedMode();
+            var next = GetNextCombinedMode(current.performanceMode, current.gpuMode);
 
             await ApplyCombinedModeAsync(next.performanceMode, next.gpuMode, CancellationToken.None);
             _performanceMode = next.performanceMode;
@@ -226,10 +205,7 @@ public sealed class HardwareServiceWorker : BackgroundService
     /// Reads the currently active combined performance and GPU mode pair from hardware.
     /// </summary>
     /// <returns>The current performance mode and GPU mode.</returns>
-    private (PerformanceMode performanceMode, GpuMode gpuMode) GetCurrentCombinedMode()
-    {
-        return (_performanceMode, _gpuMode);
-    }
+    private (PerformanceMode performanceMode, GpuMode gpuMode) GetCurrentCombinedMode() => (_performanceMode, _gpuMode);
 
     /// <summary>
     /// Returns the next combined mode pair in the service rotation.
@@ -237,15 +213,10 @@ public sealed class HardwareServiceWorker : BackgroundService
     /// <param name="performanceMode">The current performance mode.</param>
     /// <param name="gpuMode">The current GPU mode.</param>
     /// <returns>The next combined performance/GPU mode pair.</returns>
-    private static (PerformanceMode performanceMode, GpuMode gpuMode) GetNextCombinedMode(PerformanceMode performanceMode, GpuMode gpuMode)
-    {
-        if (performanceMode == PerformanceMode.Silent && gpuMode == GpuMode.Eco)
-        {
-            return (PerformanceMode.Balanced, GpuMode.Standard);
-        }
-
-        return (PerformanceMode.Silent, GpuMode.Eco);
-    }
+    private static (PerformanceMode performanceMode, GpuMode gpuMode) GetNextCombinedMode(PerformanceMode performanceMode, GpuMode gpuMode) =>
+        performanceMode == PerformanceMode.Silent && gpuMode == GpuMode.Eco
+            ? (PerformanceMode.Balanced, GpuMode.Standard)
+            : (PerformanceMode.Silent, GpuMode.Eco);
 
     /// <summary>
     /// Applies a combined performance and GPU mode pair.
@@ -258,13 +229,39 @@ public sealed class HardwareServiceWorker : BackgroundService
     {
         _logger.LogInformation("Applying combined mode {PerformanceMode}/{GpuMode}.", performanceMode, gpuMode);
 
-        int perfResult = await _modeGpuManager.SetPerformanceModeAsync(performanceMode, cancellationToken);
+        var perfResult = await _modeGpuManager.SetPerformanceModeAsync(performanceMode, cancellationToken);
         if (perfResult != 1)
         {
             _logger.LogWarning("Setting performance mode to {PerformanceMode} returned {Result}.", performanceMode, perfResult);
         }
 
-        GpuChangeResult gpuResult = await _modeGpuManager.SetGpuModeAsync(gpuMode, cancellationToken: cancellationToken);
+        var gpuResult = await _modeGpuManager.SetGpuModeAsync(gpuMode, cancellationToken: cancellationToken);
         _logger.LogInformation("GPU mode apply result for {GpuMode}: {Result}.", gpuMode, gpuResult);
+    }
+
+    /// <summary>
+    /// Applies the configured colour profile to a newly detected interactive session.
+    /// </summary>
+    /// <param name="sessionId">The active session identifier.</param>
+    /// <param name="stoppingToken">A token that signals cancellation.</param>
+    /// <returns>A task that completes when the colour profile handling finishes.</returns>
+    private async Task ApplyColourProfileForSessionAsync(int sessionId, CancellationToken stoppingToken)
+    {
+        _logger.LogInformation(
+            "New session detected. Previous={PreviousSessionId}, Current={CurrentSessionId}",
+            _lastSessionId,
+            sessionId);
+
+        await Task.Delay(_options.ColorProfileDelay, stoppingToken);
+        var started = await _colorProfileApplier.ApplyAsync(sessionId);
+
+        if (started)
+        {
+            _lastSessionId = sessionId;
+            _logger.LogInformation("AsusSplendid launch request succeeded for session {SessionId}.", sessionId);
+            return;
+        }
+
+        _logger.LogWarning("AsusSplendid launch request failed for session {SessionId}.", sessionId);
     }
 }
