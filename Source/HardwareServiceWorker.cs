@@ -30,10 +30,6 @@ public sealed class HardwareServiceWorker : BackgroundService
     private readonly MicController _micController;
     private readonly ModeGpuManager _modeGpuManager;
     private readonly HardwareOptions _options;
-    private readonly SemaphoreSlim _modeLock = new(1, 1);
-
-    private PerformanceMode _performanceMode;
-    private GpuMode _gpuMode;
     private int? _lastSessionId;
 
     /// <summary>
@@ -90,11 +86,12 @@ public sealed class HardwareServiceWorker : BackgroundService
     /// </summary>
     /// <param name="cancellationToken">A token that signals cancellation.</param>
     /// <returns>A task that completes when the restore operation finishes.</returns>
-    private async Task RestoreModesAsync(CancellationToken cancellationToken)
+    private Task RestoreModesAsync(CancellationToken cancellationToken)
     {
-        await ApplyCombinedModeAsync(_options.PerformanceMode, _options.GpuMode, cancellationToken);
-        _performanceMode = _options.PerformanceMode;
-        _gpuMode = _options.GpuMode;
+        return _modeGpuManager.ApplyCombinedModeAsync(
+            _options.PerformanceMode,
+            _options.GpuMode,
+            cancellationToken);
     }
 
     /// <summary>
@@ -164,7 +161,7 @@ public sealed class HardwareServiceWorker : BackgroundService
                     break;
 
                 case FnPlusM4:
-                    await ToggleCombinedModeAsync();
+                    await _modeGpuManager.ToggleCombinedModeAsync(CancellationToken.None);
                     break;
 
                 case FnPlusM5:
@@ -177,66 +174,6 @@ public sealed class HardwareServiceWorker : BackgroundService
         {
             _logger.LogError(ex, "Failed to handle ASUS HID event {EventId}.", eventId);
         }
-    }
-
-    /// <summary>
-    /// Cycles to the next combined performance and GPU mode pair.
-    /// </summary>
-    /// <returns>A task that completes when the mode switch has finished.</returns>
-    private async Task ToggleCombinedModeAsync()
-    {
-        await _modeLock.WaitAsync();
-        try
-        {
-            var current = GetCurrentCombinedMode();
-            var next = GetNextCombinedMode(current.performanceMode, current.gpuMode);
-
-            await ApplyCombinedModeAsync(next.performanceMode, next.gpuMode, CancellationToken.None);
-            _performanceMode = next.performanceMode;
-            _gpuMode = next.gpuMode;
-        }
-        finally
-        {
-            _modeLock.Release();
-        }
-    }
-
-    /// <summary>
-    /// Reads the currently active combined performance and GPU mode pair from hardware.
-    /// </summary>
-    /// <returns>The current performance mode and GPU mode.</returns>
-    private (PerformanceMode performanceMode, GpuMode gpuMode) GetCurrentCombinedMode() => (_performanceMode, _gpuMode);
-
-    /// <summary>
-    /// Returns the next combined mode pair in the service rotation.
-    /// </summary>
-    /// <param name="performanceMode">The current performance mode.</param>
-    /// <param name="gpuMode">The current GPU mode.</param>
-    /// <returns>The next combined performance/GPU mode pair.</returns>
-    private static (PerformanceMode performanceMode, GpuMode gpuMode) GetNextCombinedMode(PerformanceMode performanceMode, GpuMode gpuMode) =>
-        performanceMode == PerformanceMode.Silent && gpuMode == GpuMode.Eco
-            ? (PerformanceMode.Balanced, GpuMode.Standard)
-            : (PerformanceMode.Silent, GpuMode.Eco);
-
-    /// <summary>
-    /// Applies a combined performance and GPU mode pair.
-    /// </summary>
-    /// <param name="performanceMode">The performance mode to apply.</param>
-    /// <param name="gpuMode">The GPU mode to apply.</param>
-    /// <param name="cancellationToken">A token that signals cancellation.</param>
-    /// <returns>A task that completes when both mode operations have finished.</returns>
-    private async Task ApplyCombinedModeAsync(PerformanceMode performanceMode, GpuMode gpuMode, CancellationToken cancellationToken)
-    {
-        _logger.LogInformation("Applying combined mode {PerformanceMode}/{GpuMode}.", performanceMode, gpuMode);
-
-        var perfResult = await _modeGpuManager.SetPerformanceModeAsync(performanceMode, cancellationToken);
-        if (perfResult != 1)
-        {
-            _logger.LogWarning("Setting performance mode to {PerformanceMode} returned {Result}.", performanceMode, perfResult);
-        }
-
-        var gpuResult = await _modeGpuManager.SetGpuModeAsync(gpuMode, cancellationToken: cancellationToken);
-        _logger.LogInformation("GPU mode apply result for {GpuMode}: {Result}.", gpuMode, gpuResult);
     }
 
     /// <summary>

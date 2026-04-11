@@ -91,6 +91,7 @@ public sealed class ModeGpuManager
     private static readonly IReadOnlyList<PerformanceMode> _modeOrder =
         new[] { PerformanceMode.Silent, PerformanceMode.Balanced };
 
+    private readonly SemaphoreSlim _combinedModeLock = new(1, 1);
     private readonly IServiceProvider _services;
     private readonly ILogger<ModeGpuManager> _logger;
     private readonly HardwareOptions _options;
@@ -122,11 +123,90 @@ public sealed class ModeGpuManager
     public GpuMode CurrentGpuMode { get; private set; } = GpuMode.Standard;
 
     /// <summary>
+    /// Reads the currently tracked combined performance and GPU mode pair.
+    /// </summary>
+    /// <returns>The current performance mode and GPU mode.</returns>
+    public (PerformanceMode performanceMode, GpuMode gpuMode) GetCurrentCombinedMode() =>
+        (CurrentPerformanceMode, CurrentGpuMode);
+
+    /// <summary>
+    /// Returns the next combined mode pair in the service rotation.
+    /// </summary>
+    /// <param name="performanceMode">The current performance mode.</param>
+    /// <param name="gpuMode">The current GPU mode.</param>
+    /// <returns>The next combined performance/GPU mode pair.</returns>
+    public static (PerformanceMode performanceMode, GpuMode gpuMode) GetNextCombinedMode(
+        PerformanceMode performanceMode,
+        GpuMode gpuMode) =>
+        performanceMode == PerformanceMode.Silent && gpuMode == GpuMode.Eco
+            ? (PerformanceMode.Balanced, GpuMode.Standard)
+            : (PerformanceMode.Silent, GpuMode.Eco);
+
+    /// <summary>
+    /// Cycles to the next combined performance and GPU mode pair.
+    /// </summary>
+    /// <param name="cancellationToken">A token that signals cancellation.</param>
+    /// <returns>A task that completes when the mode switch has finished.</returns>
+    public async Task ToggleCombinedModeAsync(CancellationToken cancellationToken = default)
+    {
+        var current = GetCurrentCombinedMode();
+        var next = GetNextCombinedMode(current.performanceMode, current.gpuMode);
+
+        await ApplyCombinedModeAsync(next.performanceMode, next.gpuMode, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Applies a combined performance and GPU mode pair.
+    /// </summary>
+    /// <param name="performanceMode">The performance mode to apply.</param>
+    /// <param name="gpuMode">The GPU mode to apply.</param>
+    /// <param name="cancellationToken">A token that signals cancellation.</param>
+    /// <returns>A task that completes when both mode operations have finished.</returns>
+    public async Task ApplyCombinedModeAsync(
+        PerformanceMode performanceMode,
+        GpuMode gpuMode,
+        CancellationToken cancellationToken = default)
+    {
+        await _combinedModeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            _logger.LogInformation(
+                "Applying combined mode {PerformanceMode}/{GpuMode}.",
+                performanceMode,
+                gpuMode);
+
+            var perfResult = await SetPerformanceModeAsync(performanceMode, cancellationToken).ConfigureAwait(false);
+            if (perfResult != 1)
+            {
+                _logger.LogWarning(
+                    "Setting performance mode to {PerformanceMode} returned {Result}.",
+                    performanceMode,
+                    perfResult);
+            }
+
+            var gpuResult = await SetGpuModeAsync(gpuMode, cancellationToken: cancellationToken).ConfigureAwait(false);
+            if (gpuResult is not (GpuChangeResult.Changed or GpuChangeResult.NoChange))
+            {
+                _logger.LogWarning(
+                    "Setting GPU mode to {GpuMode} returned {Result}.",
+                    gpuMode,
+                    gpuResult);
+            }
+
+            CurrentPerformanceMode = performanceMode;
+            CurrentGpuMode = gpuMode;
+        }
+        finally
+        {
+            _combinedModeLock.Release();
+        }
+    }
+    /// <summary>
     /// Returns a user-friendly display name for a performance mode.
     /// </summary>
     /// <param name="mode">The performance mode.</param>
     /// <returns>The display name for the supplied mode.</returns>
-    public static string GetPerformanceModeName(PerformanceMode mode) => mode switch
+    private static string GetPerformanceModeName(PerformanceMode mode) => mode switch
     {
         PerformanceMode.Silent => "Silent",
         PerformanceMode.Balanced => "Balanced",
@@ -138,7 +218,7 @@ public sealed class ModeGpuManager
     /// </summary>
     /// <param name="mode">The GPU mode.</param>
     /// <returns>The display name for the supplied mode.</returns>
-    public static string GetGpuModeName(GpuMode mode) => mode switch
+    private static string GetGpuModeName(GpuMode mode) => mode switch
     {
         GpuMode.Eco => "Eco",
         GpuMode.Standard => "Standard",
@@ -149,7 +229,7 @@ public sealed class ModeGpuManager
     /// Updates the tracked performance mode without applying it to hardware.
     /// </summary>
     /// <param name="mode">The performance mode to track.</param>
-    public void SetPerformanceMode(PerformanceMode mode)
+    private void SetPerformanceMode(PerformanceMode mode)
     {
         CurrentPerformanceMode = mode;
     }
@@ -161,7 +241,7 @@ public sealed class ModeGpuManager
     /// <c>true</c> to move backwards through the rotation; otherwise, <c>false</c>.
     /// </param>
     /// <returns>The next performance mode.</returns>
-    public PerformanceMode GetNextPerformanceMode(bool back = false)
+    private PerformanceMode GetNextPerformanceMode(bool back = false)
     {
         var index = IndexOf(CurrentPerformanceMode);
         index = back
@@ -178,7 +258,7 @@ public sealed class ModeGpuManager
     /// <c>true</c> to move backwards through the rotation; otherwise, <c>false</c>.
     /// </param>
     /// <returns>The updated performance mode.</returns>
-    public PerformanceMode CyclePerformanceMode(bool back = false)
+    private PerformanceMode CyclePerformanceMode(bool back = false)
     {
         CurrentPerformanceMode = GetNextPerformanceMode(back);
         return CurrentPerformanceMode;
@@ -188,7 +268,7 @@ public sealed class ModeGpuManager
     /// Reads the GPU Eco flag from the ASUS ACPI interface.
     /// </summary>
     /// <returns>The raw GPU Eco flag value, or <c>-1</c> when unavailable.</returns>
-    public int ReadGpuEcoFlag()
+    private int ReadGpuEcoFlag()
     {
         using var acpi = _services.GetRequiredService<AsusAcpi>();
         return acpi.IsConnected ? acpi.DeviceGet(AsusAcpi.GpuEcoRog, "GPUEco") : -1;
@@ -198,7 +278,7 @@ public sealed class ModeGpuManager
     /// Reads the GPU MUX flag from the ASUS ACPI interface.
     /// </summary>
     /// <returns>The raw GPU MUX flag value, or <c>-1</c> when unavailable.</returns>
-    public int ReadGpuMuxFlag()
+    private int ReadGpuMuxFlag()
     {
         using var acpi = _services.GetRequiredService<AsusAcpi>();
         return acpi.IsConnected ? acpi.DeviceGet(AsusAcpi.GpuMuxRog, "GPUMux") : -1;
@@ -208,7 +288,7 @@ public sealed class ModeGpuManager
     /// Reads the current performance mode from the ASUS ACPI interface.
     /// </summary>
     /// <returns>The raw ASUS ACPI performance mode value, or <c>-1</c> when unavailable.</returns>
-    public int ReadPerformanceMode()
+    private int ReadPerformanceMode()
     {
         using var acpi = _services.GetRequiredService<AsusAcpi>();
         return acpi.IsConnected ? acpi.DeviceGet(AsusAcpi.PerformanceMode, "PerformanceMode") : -1;
@@ -220,7 +300,7 @@ public sealed class ModeGpuManager
     /// <param name="eco">The raw Eco flag value to apply.</param>
     /// <param name="cancellationToken">A token that signals cancellation.</param>
     /// <returns>A task containing the ASUS ACPI result code.</returns>
-    public Task<int> SetGpuEcoAsync(int eco, CancellationToken cancellationToken = default)
+    private Task<int> SetGpuEcoAsync(int eco, CancellationToken cancellationToken = default)
     {
         using var acpi = _services.GetRequiredService<AsusAcpi>();
         int result = acpi.IsConnected ? acpi.DeviceSet(AsusAcpi.GpuEcoRog, eco, "GPUEco") : -1;
@@ -233,7 +313,7 @@ public sealed class ModeGpuManager
     /// <param name="mux">The raw MUX flag value to apply.</param>
     /// <param name="cancellationToken">A token that signals cancellation.</param>
     /// <returns>A task containing the ASUS ACPI result code.</returns>
-    public Task<int> SetGpuMuxAsync(int mux, CancellationToken cancellationToken = default)
+    private Task<int> SetGpuMuxAsync(int mux, CancellationToken cancellationToken = default)
     {
         using var acpi = _services.GetRequiredService<AsusAcpi>();
         int result = acpi.IsConnected ? acpi.DeviceSet(AsusAcpi.GpuMuxRog, mux, "GPUMux") : -1;
@@ -246,7 +326,7 @@ public sealed class ModeGpuManager
     /// <param name="mode">The performance mode to apply.</param>
     /// <param name="cancellationToken">A token that signals cancellation.</param>
     /// <returns>A task containing the ASUS ACPI result code.</returns>
-    public Task<int> SetPerformanceModeAsync(PerformanceMode mode, CancellationToken cancellationToken = default)
+    private Task<int> SetPerformanceModeAsync(PerformanceMode mode, CancellationToken cancellationToken = default)
     {
         using var acpi = _services.GetRequiredService<AsusAcpi>();
         int result = acpi.IsConnected ? acpi.DeviceSet(AsusAcpi.PerformanceMode, (int)mode, "PerformanceMode") : -1;
@@ -257,7 +337,7 @@ public sealed class ModeGpuManager
     /// Initialises the current GPU mode state by reading it from hardware.
     /// </summary>
     /// <returns>The resolved current GPU mode.</returns>
-    public GpuMode InitialiseGpuMode()
+    private GpuMode InitialiseGpuMode()
     {
         return RefreshGpuMode();
     }
@@ -266,7 +346,7 @@ public sealed class ModeGpuManager
     /// Refreshes the tracked GPU mode by reading the current hardware flags.
     /// </summary>
     /// <returns>The resolved current GPU mode.</returns>
-    public GpuMode RefreshGpuMode()
+    private GpuMode RefreshGpuMode()
     {
         if (!HasGpuModeSupport())
         {
@@ -287,7 +367,7 @@ public sealed class ModeGpuManager
     /// <param name="ecoFlag">The raw GPU Eco flag.</param>
     /// <param name="muxFlag">The raw GPU MUX flag.</param>
     /// <returns>The resolved GPU mode.</returns>
-    public static GpuMode ResolveGpuMode(int ecoFlag, int muxFlag)
+    private static GpuMode ResolveGpuMode(int ecoFlag, int muxFlag)
     {
         if (ecoFlag == 1)
             return GpuMode.Eco;
@@ -308,7 +388,7 @@ public sealed class ModeGpuManager
     /// </param>
     /// <param name="cancellationToken">A token that signals cancellation.</param>
     /// <returns>A task containing the result of the GPU mode change request.</returns>
-    public async Task<GpuChangeResult> SetGpuModeAsync(
+    private async Task<GpuChangeResult> SetGpuModeAsync(
         GpuMode targetMode,
         int refreshDelayMs = 500,
         int nvidiaRestartDelayMs = 5000,
@@ -358,7 +438,7 @@ public sealed class ModeGpuManager
     /// <returns>
     /// A task containing <c>true</c> when a GPU mode change was applied; otherwise, <c>false</c>.
     /// </returns>
-    public async Task<bool> AutoSwitchGpuModeAsync(
+    private async Task<bool> AutoSwitchGpuModeAsync(
         bool autoModeEnabled,
         bool forceConfiguredMode,
         GpuMode configuredMode,
@@ -421,7 +501,7 @@ public sealed class ModeGpuManager
     /// Determines whether the system is currently connected to AC power.
     /// </summary>
     /// <returns><c>true</c> when the system is plugged in; otherwise, <c>false</c>.</returns>
-    public bool IsPluggedIn()
+    private bool IsPluggedIn()
     {
         if (!GetSystemPowerStatus(out SystemPowerStatus status))
             return true;
@@ -435,13 +515,13 @@ public sealed class ModeGpuManager
     /// <returns>
     /// <c>true</c> if an external GPU is connected; otherwise, <c>false</c>.
     /// </returns>
-    public bool IsExternalGpuConnected() => false;
+    private bool IsExternalGpuConnected() => false;
 
     /// <summary>
     /// Determines whether the discrete GPU currently appears to be in use.
     /// </summary>
     /// <returns><c>true</c> if the GPU appears to be in use; otherwise, <c>false</c>.</returns>
-    public bool IsGpuInUse() => false;
+    private bool IsGpuInUse() => false;
 
     /// <summary>
     /// Determines whether Eco mode must be disabled before switching to Ultimate mode.
@@ -449,20 +529,20 @@ public sealed class ModeGpuManager
     /// <returns>
     /// <c>true</c> when Eco must be turned off before enabling Ultimate; otherwise, <c>false</c>.
     /// </returns>
-    public bool RequiresEcoOffBeforeUltimate() => true;
+    private bool RequiresEcoOffBeforeUltimate() => true;
 
     /// <summary>
     /// Determines whether GPU mode control is supported on the current device.
     /// </summary>
     /// <returns><c>true</c> when GPU mode control is supported; otherwise, <c>false</c>.</returns>
-    public bool HasGpuModeSupport() => ReadGpuEcoFlag() >= 0;
+    private bool HasGpuModeSupport() => ReadGpuEcoFlag() >= 0;
 
     /// <summary>
     /// Runs any actions required before enabling Eco GPU mode.
     /// </summary>
     /// <param name="cancellationToken">A token that signals cancellation.</param>
     /// <returns>A completed task.</returns>
-    public Task OnBeforeEcoEnabledAsync(CancellationToken cancellationToken = default)
+    private Task OnBeforeEcoEnabledAsync(CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("Preparing to enable Eco GPU mode.");
         return Task.CompletedTask;
@@ -473,7 +553,7 @@ public sealed class ModeGpuManager
     /// </summary>
     /// <param name="cancellationToken">A token that signals cancellation.</param>
     /// <returns>A completed task.</returns>
-    public Task OnAfterEcoDisabledAsync(CancellationToken cancellationToken = default)
+    private Task OnAfterEcoDisabledAsync(CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("GPU Eco mode disabled.");
         return Task.CompletedTask;
@@ -484,7 +564,7 @@ public sealed class ModeGpuManager
     /// </summary>
     /// <param name="cancellationToken">A token that signals cancellation.</param>
     /// <returns>A completed task.</returns>
-    public Task ReapplyPerformanceTweaksAsync(CancellationToken cancellationToken = default)
+    private Task ReapplyPerformanceTweaksAsync(CancellationToken cancellationToken = default)
     {
         _logger.LogDebug(
             "ReapplyPerformanceTweaksAsync requested for {PerformanceMode}/{GpuMode}.",
