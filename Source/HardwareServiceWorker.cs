@@ -26,9 +26,9 @@ public sealed class HardwareServiceWorker : BackgroundService
     private readonly AsusHidInput _hid;
     private readonly BatteryChargeLimiter _batteryChargeLimiter;
     private readonly BrightnessController _brightnessController;
-    private readonly ColorProfileApplier _colorProfileApplier;
+    private readonly SplendidProfileApplier _splendidProfileApplier;
     private readonly MicController _micController;
-    private readonly ModeGpuManager _modeGpuManager;
+    private readonly PerformanceGpuController _performanceGpuController;
     private readonly HardwareOptions _options;
     private int? _lastSessionId;
 
@@ -39,27 +39,27 @@ public sealed class HardwareServiceWorker : BackgroundService
     /// <param name="hid">The ASUS HID input listener used to receive hotkey events.</param>
     /// <param name="batteryChargeLimiter">The battery charge limiter controller.</param>
     /// <param name="brightnessController">The brightness controller.</param>
-    /// <param name="colorProfileApplier">The colour profile launcher and applier.</param>
+    /// <param name="splendidProfileApplier">The colour profile launcher and applier.</param>
     /// <param name="micController">The microphone mute controller.</param>
-    /// <param name="modeGpuManager">The combined performance and GPU mode manager.</param>
+    /// <param name="performanceGpuController">The combined performance and GPU mode manager.</param>
     /// <param name="options">The configured hardware service options.</param>
     public HardwareServiceWorker(
         ILogger<HardwareServiceWorker> logger,
         AsusHidInput hid,
         BatteryChargeLimiter batteryChargeLimiter,
         BrightnessController brightnessController,
-        ColorProfileApplier colorProfileApplier,
+        SplendidProfileApplier splendidProfileApplier,
         MicController micController,
-        ModeGpuManager modeGpuManager,
+        PerformanceGpuController performanceGpuController,
         IOptions<HardwareOptions> options)
     {
         _logger = logger;
         _hid = hid;
         _batteryChargeLimiter = batteryChargeLimiter;
         _brightnessController = brightnessController;
-        _colorProfileApplier = colorProfileApplier;
+        _splendidProfileApplier = splendidProfileApplier;
         _micController = micController;
-        _modeGpuManager = modeGpuManager;
+        _performanceGpuController = performanceGpuController;
         _options = options.Value;
     }
 
@@ -73,7 +73,7 @@ public sealed class HardwareServiceWorker : BackgroundService
         _logger.LogInformation("Service started in Session 0.");
 
         _batteryChargeLimiter.ApplyChargeLimit();
-        await RestoreModesAsync(stoppingToken);
+        await ApplyConfiguredModesAsync(stoppingToken);
 
         var hidTask = Task.Run(() => _hid.ListenAsync(HandleAsusEventAsync, stoppingToken), stoppingToken);
         var sessionTask = MonitorUserSessionAsync(stoppingToken);
@@ -86,9 +86,9 @@ public sealed class HardwareServiceWorker : BackgroundService
     /// </summary>
     /// <param name="cancellationToken">A token that signals cancellation.</param>
     /// <returns>A task that completes when the restore operation finishes.</returns>
-    private Task RestoreModesAsync(CancellationToken cancellationToken)
+    private Task ApplyConfiguredModesAsync(CancellationToken cancellationToken)
     {
-        return _modeGpuManager.ApplyCombinedModeAsync(
+        return _performanceGpuController.ApplyCombinedModeAsync(
             _options.PerformanceMode,
             _options.GpuMode,
             cancellationToken);
@@ -108,7 +108,7 @@ public sealed class HardwareServiceWorker : BackgroundService
         {
             try
             {
-                var session = UserSessionHelper.TryGetActiveInteractiveSession();
+                var session = UserSessionHelper.GetActiveInteractiveSession();
                 if (session is null)
                 {
                     _logger.LogInformation("No active interactive session detected.");
@@ -124,7 +124,7 @@ public sealed class HardwareServiceWorker : BackgroundService
 
                     if (_lastSessionId != session.SessionId)
                     {
-                        await ApplyColourProfileForSessionAsync(session.SessionId, stoppingToken);
+                        await ApplyColorProfileForSessionAsync(session.SessionId, stoppingToken);
                     }
                 }
             }
@@ -161,7 +161,7 @@ public sealed class HardwareServiceWorker : BackgroundService
                     break;
 
                 case FnPlusM4:
-                    await _modeGpuManager.ToggleCombinedModeAsync(CancellationToken.None);
+                    await _performanceGpuController.ToggleCombinedModeAsync(CancellationToken.None);
                     break;
 
                 case FnPlusM5:
@@ -182,7 +182,7 @@ public sealed class HardwareServiceWorker : BackgroundService
     /// <param name="sessionId">The active session identifier.</param>
     /// <param name="stoppingToken">A token that signals cancellation.</param>
     /// <returns>A task that completes when the colour profile handling finishes.</returns>
-    private async Task ApplyColourProfileForSessionAsync(int sessionId, CancellationToken stoppingToken)
+    private async Task ApplyColorProfileForSessionAsync(int sessionId, CancellationToken stoppingToken)
     {
         _logger.LogInformation(
             "New session detected. Previous={PreviousSessionId}, Current={CurrentSessionId}",
@@ -190,7 +190,7 @@ public sealed class HardwareServiceWorker : BackgroundService
             sessionId);
 
         await Task.Delay(_options.ColorProfileDelay, stoppingToken);
-        var started = await _colorProfileApplier.ApplyAsync(sessionId);
+        var started = await _splendidProfileApplier.ApplyProfileAsync(sessionId);
 
         if (started)
         {

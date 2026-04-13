@@ -51,7 +51,7 @@ public static class UserSessionHelper
     /// A <see cref="SessionInfo"/> instance when an active interactive session with a logged-in
     /// user is available; otherwise, <see langword="null"/>.
     /// </returns>
-    public static SessionInfo? TryGetActiveInteractiveSession()
+    public static SessionInfo? GetActiveInteractiveSession()
     {
         var sessionId = WTSGetActiveConsoleSessionId();
         if (sessionId == InvalidSessionId)

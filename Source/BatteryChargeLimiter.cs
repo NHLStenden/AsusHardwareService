@@ -69,7 +69,7 @@ public sealed class BatteryChargeLimiter
 
             _logger.LogInformation("Setting battery charge limit to {Limit}.", limit);
 
-            var result = acpi.DeviceSet(AsusAcpi.BatteryLimit, limit, "Limit");
+            var result = acpi.SetDeviceValue(AsusAcpi.BatteryLimit, limit, "Limit");
             if (result != 1)
             {
                 _logger.LogError("ACPI call returned {Result}.", result);

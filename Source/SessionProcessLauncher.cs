@@ -75,7 +75,7 @@ public static class SessionProcessLauncher
     /// <returns>
     /// <see langword="true"/> if the process was started successfully; otherwise, <see langword="false"/>.
     /// </returns>
-    public static bool TryStartInSession(
+    public static bool TryStartProcessInSession(
         int sessionId,
         string executablePath,
         string arguments,
