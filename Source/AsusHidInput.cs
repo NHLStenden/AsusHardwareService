@@ -2,7 +2,6 @@ using System.Collections.Frozen;
 using System.Text;
 using HidSharp;
 using HidSharp.Reports;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace AsusHardwareService;

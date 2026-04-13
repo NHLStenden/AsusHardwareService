@@ -1,5 +1,4 @@
 using System.Management;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace AsusHardwareService;
