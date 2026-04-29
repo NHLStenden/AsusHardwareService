@@ -8,9 +8,9 @@ namespace AsusHardwareService;
 /// <remarks>
 /// This worker applies startup hardware state, listens for ASUS HID hotkey events, monitors the
 /// active interactive user session, and dispatches hardware actions to the service controllers.
-/// It currently handles battery charge limit initialisation, colour profile application on session
-/// changes, brightness and microphone hotkeys, and combined performance/GPU mode switching through
-/// <c>Fn+M4</c>.
+/// It handles battery charge limit initialisation, ASUS display settings, colour profile application
+/// on session changes, brightness and microphone hotkeys, and combined performance/GPU mode switching
+/// through <c>Fn+M4</c>.
 /// </remarks>
 public sealed class HardwareServiceWorker : BackgroundService
 {
@@ -26,6 +26,7 @@ public sealed class HardwareServiceWorker : BackgroundService
     private readonly AsusHidInput _hid;
     private readonly BatteryChargeLimiter _batteryChargeLimiter;
     private readonly BrightnessController _brightnessController;
+    private readonly DisplayController _displayController;
     private readonly SplendidProfileApplier _splendidProfileApplier;
     private readonly MicController _micController;
     private readonly PerformanceGpuController _performanceGpuController;
@@ -39,6 +40,7 @@ public sealed class HardwareServiceWorker : BackgroundService
     /// <param name="hid">The ASUS HID input listener used to receive hotkey events.</param>
     /// <param name="batteryChargeLimiter">The battery charge limiter controller.</param>
     /// <param name="brightnessController">The brightness controller.</param>
+    /// <param name="displayController">The display controller.</param>
     /// <param name="splendidProfileApplier">The colour profile launcher and applier.</param>
     /// <param name="micController">The microphone mute controller.</param>
     /// <param name="performanceGpuController">The combined performance and GPU mode manager.</param>
@@ -48,6 +50,7 @@ public sealed class HardwareServiceWorker : BackgroundService
         AsusHidInput hid,
         BatteryChargeLimiter batteryChargeLimiter,
         BrightnessController brightnessController,
+        DisplayController displayController,
         SplendidProfileApplier splendidProfileApplier,
         MicController micController,
         PerformanceGpuController performanceGpuController,
@@ -57,6 +60,7 @@ public sealed class HardwareServiceWorker : BackgroundService
         _hid = hid;
         _batteryChargeLimiter = batteryChargeLimiter;
         _brightnessController = brightnessController;
+        _displayController = displayController;
         _splendidProfileApplier = splendidProfileApplier;
         _micController = micController;
         _performanceGpuController = performanceGpuController;
@@ -73,6 +77,7 @@ public sealed class HardwareServiceWorker : BackgroundService
         _logger.LogInformation("Service started in Session 0.");
 
         _batteryChargeLimiter.ApplyChargeLimit();
+        _displayController.ApplyConfiguredServiceDisplaySettings();
         await ApplyConfiguredModesAsync(stoppingToken);
 
         var hidTask = Task.Run(() => _hid.ListenAsync(HandleAsusEventAsync, stoppingToken), stoppingToken);
@@ -95,45 +100,95 @@ public sealed class HardwareServiceWorker : BackgroundService
     }
 
     /// <summary>
-    /// Polls for the active interactive user session and reapplies the configured colour profile when
-    /// a new session becomes active.
+    /// Waits for interactive user sessions and reapplies user-session display and colour settings
+    /// whenever a new session becomes active.
     /// </summary>
     /// <param name="stoppingToken">A token that signals when the service should stop.</param>
     /// <returns>A task that completes when session monitoring stops.</returns>
     private async Task MonitorUserSessionAsync(CancellationToken stoppingToken)
     {
-        using var timer = new PeriodicTimer(SessionMonitorInterval);
-
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                var session = UserSessionHelper.GetActiveInteractiveSession();
+                var session = await UserSessionHelper.WaitForActiveInteractiveSessionAsync(
+                    SessionMonitorInterval,
+                    stoppingToken);
+
                 if (session is null)
                 {
-                    _logger.LogInformation("No active interactive session detected.");
-                    _lastSessionId = null;
+                    return;
                 }
-                else
-                {
-                    _logger.LogInformation(
-                        "Active interactive session detected. SessionId={SessionId}, User={Domain}\\{User}",
-                        session.SessionId,
-                        session.Domain,
-                        session.UserName);
 
-                    if (_lastSessionId != session.SessionId)
-                    {
-                        await ApplyColorProfileForSessionAsync(session.SessionId, stoppingToken);
-                    }
-                }
+                await HandleInteractiveSessionAsync(session, stoppingToken);
+                await WaitForSessionChangeAsync(session.SessionId, stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                return;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error while monitoring interactive user session.");
+                await Task.Delay(SessionMonitorInterval, stoppingToken);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Applies settings that need an active interactive user session.
+    /// </summary>
+    /// <param name="session">The active interactive user session.</param>
+    /// <param name="stoppingToken">A token that signals cancellation.</param>
+    /// <returns>A task that completes when the session-specific startup actions finish.</returns>
+    private async Task HandleInteractiveSessionAsync(SessionInfo session, CancellationToken stoppingToken)
+    {
+        if (_lastSessionId == session.SessionId)
+        {
+            return;
+        }
+
+        _logger.LogInformation(
+            "Active interactive session detected. SessionId={SessionId}, User={Domain}\\{User}",
+            session.SessionId,
+            session.Domain,
+            session.UserName);
+
+        _lastSessionId = session.SessionId;
+
+        _displayController.ApplyConfiguredLaptopScreenMode(session);
+        await ApplyColorProfileForSessionAsync(session.SessionId, stoppingToken);
+    }
+
+    /// <summary>
+    /// Waits until the current active session disappears or changes.
+    /// </summary>
+    /// <param name="sessionId">The session currently being tracked.</param>
+    /// <param name="stoppingToken">A token that signals cancellation.</param>
+    /// <returns>A task that completes when the session changes or monitoring stops.</returns>
+    private async Task WaitForSessionChangeAsync(int sessionId, CancellationToken stoppingToken)
+    {
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            await Task.Delay(SessionMonitorInterval, stoppingToken);
+
+            var session = UserSessionHelper.GetActiveInteractiveSession();
+            if (session?.SessionId == sessionId)
+            {
+                continue;
             }
 
-            await timer.WaitForNextTickAsync(stoppingToken);
+            _logger.LogInformation(
+                "Interactive session changed. Previous={PreviousSessionId}, Current={CurrentSessionId}",
+                sessionId,
+                session?.SessionId);
+
+            if (session is null)
+            {
+                _lastSessionId = null;
+            }
+
+            return;
         }
     }
 
@@ -184,17 +239,13 @@ public sealed class HardwareServiceWorker : BackgroundService
     /// <returns>A task that completes when the colour profile handling finishes.</returns>
     private async Task ApplyColorProfileForSessionAsync(int sessionId, CancellationToken stoppingToken)
     {
-        _logger.LogInformation(
-            "New session detected. Previous={PreviousSessionId}, Current={CurrentSessionId}",
-            _lastSessionId,
-            sessionId);
+        _logger.LogInformation("Applying user-session colour profile for session {SessionId}.", sessionId);
 
         await Task.Delay(_options.ColorProfileDelay, stoppingToken);
         var started = await _splendidProfileApplier.ApplyProfileAsync(sessionId);
 
         if (started)
         {
-            _lastSessionId = sessionId;
             _logger.LogInformation("AsusSplendid launch request succeeded for session {SessionId}.", sessionId);
             return;
         }

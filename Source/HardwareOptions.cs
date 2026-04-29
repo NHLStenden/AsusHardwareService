@@ -36,20 +36,17 @@ public enum GpuMode
 /// Represents configurable settings for the ASUS hardware service.
 /// </summary>
 /// <remarks>
-/// These options control the battery charge limit applied at startup, the brightness step size
-/// used for supported hotkey events, retry timing for HID device discovery, and optional behaviour
-/// for model-specific event handling and interactive-session brightness notifications.
+/// These options control the hardware state applied at startup and on relevant user-session changes.
 /// </remarks>
 public sealed class HardwareOptions
 {
     /// <summary>
     /// Gets or sets the battery charge limit percentage to apply through the ASUS ACPI interface.
     /// </summary>
-    /// <value>A percentage value typically between 1 and 99.</value>
     public int ChargeLimit { get; set; } = 60;
 
     /// <summary>
-    /// Gets or sets the brightness step size, in percentage points, used when increasing or decreasing brightness.
+    /// Gets or sets the brightness step size, in percentage points.
     /// </summary>
     public int BrightnessStep { get; set; } = 10;
 
@@ -59,16 +56,22 @@ public sealed class HardwareOptions
     public int RetryDelay { get; set; } = 1500;
 
     /// <summary>
+    /// Gets or sets the laptop panel refresh-rate and overdrive preset to apply.
+    /// </summary>
+    public LaptopScreenMode LaptopScreenMode { get; set; } = LaptopScreenMode.Auto;
+
+    /// <summary>
+    /// Gets or sets the MiniLED backlight zone mode to apply.
+    /// </summary>
+    public MiniLedMode MiniLedMode { get; set; } = MiniLedMode.MultiZone;
+
+    /// <summary>
     /// Gets or sets a value indicating whether brightness changes should be broadcast to a per-user helper.
     /// </summary>
-    /// <remarks>
-    /// When enabled, the service can publish brightness updates over an inter-process channel such as a named pipe,
-    /// allowing a helper application in the interactive user session to show a toast or custom on-screen display.
-    /// </remarks>
     public bool BroadcastBrightnessChanges { get; set; } = true;
 
     /// <summary>
-    /// Gets or sets the flag for setting the color profile to default.
+    /// Gets or sets a value indicating whether the colour profile should be reset to default.
     /// </summary>
     public bool ColorProfileToDefault { get; set; }
 
@@ -83,32 +86,31 @@ public sealed class HardwareOptions
     public SplendidGamut GamutMode { get; set; } = SplendidGamut.Native;
 
     /// <summary>
-    /// Gets or sets the color temperature to apply.
+    /// Gets or sets the colour temperature to apply.
     /// </summary>
     /// <remarks>
-    /// Valid values typically follow the GHelper scale:
-    /// 0, 15, 30, 50, 70, 85, 100.
-    /// A value of 50 is neutral.
+    /// Valid values typically follow the scale: <c>0</c>, <c>15</c>, <c>30</c>, <c>50</c>,
+    /// <c>70</c>, <c>85</c>, and <c>100</c>. A value of <c>50</c> is neutral.
     /// </remarks>
     public int ColorTemperature { get; set; } = 50;
 
     /// <summary>
-    /// Gets or sets the delay, in milliseconds, before applying the color profile.
+    /// Gets or sets the delay, in milliseconds, before applying the colour profile after a session change.
     /// </summary>
     public int ColorProfileDelay { get; set; } = 8000;
 
     /// <summary>
-    /// Gets or sets the delay, in milliseconds, before calling the Splendid.exe command.
+    /// Gets or sets the delay, in milliseconds, before calling the Splendid command.
     /// </summary>
     public int ColorProfileCommandDelay { get; set; } = 1000;
 
     /// <summary>
-    /// Gets or sets the performance mode.
+    /// Gets or sets the configured performance mode.
     /// </summary>
     public PerformanceMode PerformanceMode { get; set; } = PerformanceMode.Silent;
 
     /// <summary>
-    /// Gets or sets the GPU mode.
+    /// Gets or sets the configured GPU mode.
     /// </summary>
     public GpuMode GpuMode { get; set; } = GpuMode.Eco;
 }

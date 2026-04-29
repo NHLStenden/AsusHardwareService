@@ -79,6 +79,34 @@ public static class UserSessionHelper
         };
     }
 
+
+    /// <summary>
+    /// Waits until an active interactive user session is available.
+    /// </summary>
+    /// <param name="pollingInterval">The delay between session checks.</param>
+    /// <param name="cancellationToken">A token that signals cancellation.</param>
+    /// <returns>
+    /// The active <see cref="SessionInfo"/> when a session becomes available; otherwise,
+    /// <see langword="null"/> when cancellation is requested.
+    /// </returns>
+    public static async Task<SessionInfo?> WaitForActiveInteractiveSessionAsync(
+        TimeSpan pollingInterval,
+        CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            var session = GetActiveInteractiveSession();
+            if (session is not null)
+            {
+                return session;
+            }
+
+            await Task.Delay(pollingInterval, cancellationToken);
+        }
+
+        return null;
+    }
+
     /// <summary>
     /// Reads a Unicode string value from WTS session information.
     /// </summary>

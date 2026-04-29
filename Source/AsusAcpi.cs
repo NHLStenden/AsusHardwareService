@@ -33,6 +33,21 @@ public sealed class AsusAcpi : IDisposable
     public const uint BatteryLimit = 0x00120057;
 
     /// <summary>
+    /// ASUS ACPI device identifier for laptop panel overdrive.
+    /// </summary>
+    public const uint ScreenOverdrive = 0x00050019;
+
+    /// <summary>
+    /// ASUS ACPI MiniLED endpoint used by two-state MiniLED panels.
+    /// </summary>
+    public const uint ScreenMiniled1 = 0x0005001E;
+
+    /// <summary>
+    /// ASUS ACPI MiniLED endpoint used by three-state MiniLED panels.
+    /// </summary>
+    public const uint ScreenMiniled2 = 0x0005002E;
+
+    /// <summary>
     /// ASUS ACPI device identifier for the performance mode setting.
     /// </summary>
     public const uint PerformanceMode = 0x00120075;
@@ -100,6 +115,30 @@ public sealed class AsusAcpi : IDisposable
         if (!string.IsNullOrWhiteSpace(logName))
         {
             _logger.LogInformation("{Name} set to {Value}. Result={Result}", logName, value, result == 1 ? "OK" : result);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Reads a raw ASUS ACPI value without applying the standard ASUS read-result offset.
+    /// </summary>
+    /// <param name="deviceId">The ASUS ACPI device identifier.</param>
+    /// <param name="logName">An optional friendly name used in log messages.</param>
+    /// <returns>The raw value returned by the ASUS ACPI driver.</returns>
+    public int GetRawDeviceValue(uint deviceId, string? logName = null)
+    {
+        ThrowIfDisposed();
+
+        var arguments = new byte[4];
+        BitConverter.GetBytes(deviceId).CopyTo(arguments, 0);
+
+        var reply = InvokeMethod(ReadMethodId, arguments);
+        var result = BitConverter.ToInt32(reply, 0);
+
+        if (!string.IsNullOrWhiteSpace(logName))
+        {
+            _logger.LogInformation("{Name} raw read returned {Result}.", logName, result);
         }
 
         return result;

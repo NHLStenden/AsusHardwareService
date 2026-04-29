@@ -1,6 +1,11 @@
 using AsusHardwareService;
 using Microsoft.Extensions.Logging.EventLog;
 
+if (DisplayCommand.TryHandle(args, out var exitCode))
+{
+    return exitCode;
+}
+
 var builder = Host.CreateApplicationBuilder(args);
 
 builder.Services.AddWindowsService(options =>
@@ -24,9 +29,11 @@ builder.Services.AddTransient<AsusAcpi>();
 builder.Services.AddSingleton<AsusHidInput>();
 builder.Services.AddSingleton<BatteryChargeLimiter>();
 builder.Services.AddSingleton<BrightnessController>();
+builder.Services.AddSingleton<DisplayController>();
 builder.Services.AddSingleton<SplendidProfileApplier>();
 builder.Services.AddSingleton<MicController>();
 builder.Services.AddSingleton<PerformanceGpuController>();
 builder.Services.AddHostedService<HardwareServiceWorker>();
 
 await builder.Build().RunAsync();
+return 0;
