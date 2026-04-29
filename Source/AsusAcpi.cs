@@ -1,4 +1,6 @@
+using System.Buffers.Binary;
 using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 
 namespace AsusHardwareService;
 
@@ -24,8 +26,6 @@ public sealed class AsusAcpi : IDisposable
     private const int OutputBufferSize = 16;
     private const int RequestHeaderSize = 8;
     private const int ReadResultOffset = 65536;
-
-    private static readonly IntPtr InvalidHandle = new(-1);
 
     /// <summary>
     /// ASUS ACPI device identifier for the battery charge limit setting.
@@ -63,7 +63,7 @@ public sealed class AsusAcpi : IDisposable
     public const uint GpuMuxRog = 0x00090016;
 
     private readonly ILogger<AsusAcpi> _logger;
-    private IntPtr _deviceHandle;
+    private readonly SafeFileHandle _deviceHandle;
     private bool _disposed;
 
     /// <summary>
@@ -76,7 +76,7 @@ public sealed class AsusAcpi : IDisposable
     /// </summary>
     public AsusAcpi(ILogger<AsusAcpi> logger)
     {
-        _logger = logger;
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         _deviceHandle = CreateFile(
             DevicePath,
@@ -87,7 +87,7 @@ public sealed class AsusAcpi : IDisposable
             FileAttributeNormal,
             IntPtr.Zero);
 
-        IsConnected = _deviceHandle != IntPtr.Zero && _deviceHandle != InvalidHandle;
+        IsConnected = !_deviceHandle.IsInvalid;
         if (!IsConnected)
         {
             _logger.LogError("Cannot open {DevicePath}. Win32 error {Error}.", DevicePath, Marshal.GetLastWin32Error());
@@ -105,12 +105,12 @@ public sealed class AsusAcpi : IDisposable
     {
         ThrowIfDisposed();
 
-        var arguments = new byte[8];
-        BitConverter.GetBytes(deviceId).CopyTo(arguments, 0);
-        BitConverter.GetBytes((uint)value).CopyTo(arguments, 4);
+        Span<byte> arguments = stackalloc byte[8];
+        BinaryPrimitives.WriteUInt32LittleEndian(arguments, deviceId);
+        BinaryPrimitives.WriteUInt32LittleEndian(arguments[4..], unchecked((uint)value));
 
         var reply = InvokeMethod(WriteMethodId, arguments);
-        var result = BitConverter.ToInt32(reply, 0);
+        var result = BinaryPrimitives.ReadInt32LittleEndian(reply);
 
         if (!string.IsNullOrWhiteSpace(logName))
         {
@@ -130,11 +130,11 @@ public sealed class AsusAcpi : IDisposable
     {
         ThrowIfDisposed();
 
-        var arguments = new byte[4];
-        BitConverter.GetBytes(deviceId).CopyTo(arguments, 0);
+        Span<byte> arguments = stackalloc byte[4];
+        BinaryPrimitives.WriteUInt32LittleEndian(arguments, deviceId);
 
         var reply = InvokeMethod(ReadMethodId, arguments);
-        var result = BitConverter.ToInt32(reply, 0);
+        var result = BinaryPrimitives.ReadInt32LittleEndian(reply);
 
         if (!string.IsNullOrWhiteSpace(logName))
         {
@@ -154,11 +154,11 @@ public sealed class AsusAcpi : IDisposable
     {
         ThrowIfDisposed();
 
-        var arguments = new byte[8];
-        BitConverter.GetBytes(deviceId).CopyTo(arguments, 0);
+        Span<byte> arguments = stackalloc byte[8];
+        BinaryPrimitives.WriteUInt32LittleEndian(arguments, deviceId);
 
         var reply = InvokeMethod(ReadMethodId, arguments);
-        var result = BitConverter.ToInt32(reply, 0) - ReadResultOffset;
+        var result = BinaryPrimitives.ReadInt32LittleEndian(reply) - ReadResultOffset;
 
         if (!string.IsNullOrWhiteSpace(logName))
         {
@@ -173,28 +173,33 @@ public sealed class AsusAcpi : IDisposable
     /// </summary>
     public void Dispose()
     {
-        Dispose(disposing: true);
-        GC.SuppressFinalize(this);
-    }
+        if (_disposed)
+        {
+            return;
+        }
 
-    ~AsusAcpi()
-    {
-        Dispose(disposing: false);
+        _deviceHandle.Dispose();
+        _disposed = true;
     }
 
     /// <summary>
     /// Calls an ASUS ACPI method through <c>DeviceIoControl</c>.
     /// </summary>
-    private byte[] InvokeMethod(uint methodId, byte[] arguments)
+    /// <param name="methodId">The ASUS ACPI method identifier to invoke.</param>
+    /// <param name="arguments">The raw method payload.</param>
+    /// <returns>The raw response bytes returned by the driver.</returns>
+    /// <exception cref="ObjectDisposedException">Thrown when the ACPI wrapper has already been disposed.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the native driver call fails.</exception>
+    private byte[] InvokeMethod(uint methodId, ReadOnlySpan<byte> arguments)
     {
         ThrowIfDisposed();
 
         var requestBuffer = new byte[RequestHeaderSize + arguments.Length];
         var responseBuffer = new byte[OutputBufferSize];
 
-        BitConverter.GetBytes(methodId).CopyTo(requestBuffer, 0);
-        BitConverter.GetBytes((uint)arguments.Length).CopyTo(requestBuffer, 4);
-        Array.Copy(arguments, 0, requestBuffer, RequestHeaderSize, arguments.Length);
+        BinaryPrimitives.WriteUInt32LittleEndian(requestBuffer, methodId);
+        BinaryPrimitives.WriteUInt32LittleEndian(requestBuffer.AsSpan(4), (uint)arguments.Length);
+        arguments.CopyTo(requestBuffer.AsSpan(RequestHeaderSize));
 
         uint bytesReturned = 0;
         var succeeded = DeviceIoControl(
@@ -212,23 +217,12 @@ public sealed class AsusAcpi : IDisposable
             throw new InvalidOperationException($"DeviceIoControl failed with Win32 error {Marshal.GetLastWin32Error()}.");
         }
 
+        if (bytesReturned < sizeof(int))
+        {
+            throw new InvalidOperationException($"DeviceIoControl returned an incomplete response. BytesReturned={bytesReturned}.");
+        }
+
         return responseBuffer;
-    }
-
-    private void Dispose(bool disposing)
-    {
-        if (_disposed)
-        {
-            return;
-        }
-
-        if (_deviceHandle != IntPtr.Zero && _deviceHandle != InvalidHandle)
-        {
-            CloseHandle(_deviceHandle);
-            _deviceHandle = IntPtr.Zero;
-        }
-
-        _disposed = true;
     }
 
     private void ThrowIfDisposed()
@@ -237,7 +231,7 @@ public sealed class AsusAcpi : IDisposable
     }
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern IntPtr CreateFile(
+    private static extern SafeFileHandle CreateFile(
         string lpFileName,
         uint dwDesiredAccess,
         uint dwShareMode,
@@ -248,7 +242,7 @@ public sealed class AsusAcpi : IDisposable
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool DeviceIoControl(
-        IntPtr hDevice,
+        SafeFileHandle hDevice,
         uint dwIoControlCode,
         byte[] lpInBuffer,
         uint nInBufferSize,
@@ -257,6 +251,4 @@ public sealed class AsusAcpi : IDisposable
         ref uint lpBytesReturned,
         IntPtr lpOverlapped);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool CloseHandle(IntPtr hObject);
 }

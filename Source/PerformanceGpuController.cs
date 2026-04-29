@@ -50,7 +50,7 @@ public sealed class PerformanceGpuController
     private readonly SemaphoreSlim _modeSwitchLock = new(1, 1);
     private readonly IServiceProvider _services;
     private readonly ILogger<PerformanceGpuController> _logger;
-    private readonly HardwareOptions _options;
+    private readonly IOptionsMonitor<HardwareOptions> _options;
 
     /// <summary>
     /// Initialises a new instance of the <see cref="PerformanceGpuController"/> class.
@@ -58,11 +58,11 @@ public sealed class PerformanceGpuController
     public PerformanceGpuController(
         IServiceProvider services,
         ILogger<PerformanceGpuController> logger,
-        IOptions<HardwareOptions> options)
+        IOptionsMonitor<HardwareOptions> options)
     {
-        _services = services;
-        _logger = logger;
-        _options = options.Value;
+        _services = services ?? throw new ArgumentNullException(nameof(services));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
     /// <summary>
@@ -268,8 +268,8 @@ public sealed class PerformanceGpuController
 
         _logger.LogDebug(
             "Performance/GPU configuration remains {PerformanceMode}/{GpuMode} after GPU transition.",
-            _options.PerformanceMode,
-            _options.GpuMode);
+            _options.CurrentValue.PerformanceMode,
+            _options.CurrentValue.GpuMode);
     }
 
 }

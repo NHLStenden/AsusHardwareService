@@ -18,7 +18,7 @@ public sealed class BatteryChargeLimiter
 
     private readonly ILogger<BatteryChargeLimiter> _logger;
     private readonly IServiceProvider _services;
-    private readonly HardwareOptions _options;
+    private readonly IOptionsMonitor<HardwareOptions> _options;
 
     /// <summary>
     /// Initialises a new instance of the <see cref="BatteryChargeLimiter"/> class.
@@ -29,11 +29,11 @@ public sealed class BatteryChargeLimiter
     public BatteryChargeLimiter(
         ILogger<BatteryChargeLimiter> logger,
         IServiceProvider services,
-        IOptions<HardwareOptions> options)
+        IOptionsMonitor<HardwareOptions> options)
     {
-        _logger = logger;
-        _services = services;
-        _options = options.Value;
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _services = services ?? throw new ArgumentNullException(nameof(services));
+        _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
     /// <summary>
@@ -48,7 +48,7 @@ public sealed class BatteryChargeLimiter
     {
         try
         {
-            var limit = _options.ChargeLimit;
+            var limit = _options.CurrentValue.ChargeLimit;
             if (limit is <= 0 or >= 100)
             {
                 _logger.LogError("No valid charge limit configured. Value: {Limit}", limit);

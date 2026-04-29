@@ -27,9 +27,9 @@ public sealed class DisplayController
         ILogger<DisplayController> logger,
         IOptionsMonitor<HardwareOptions> options)
     {
-        _acpi = acpi;
-        _logger = logger;
-        _options = options;
+        _acpi = acpi ?? throw new ArgumentNullException(nameof(acpi));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
     /// <summary>

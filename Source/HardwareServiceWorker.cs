@@ -30,7 +30,7 @@ public sealed class HardwareServiceWorker : BackgroundService
     private readonly SplendidProfileApplier _splendidProfileApplier;
     private readonly MicController _micController;
     private readonly PerformanceGpuController _performanceGpuController;
-    private readonly HardwareOptions _options;
+    private readonly IOptionsMonitor<HardwareOptions> _options;
     private int? _lastSessionId;
 
     /// <summary>
@@ -54,17 +54,17 @@ public sealed class HardwareServiceWorker : BackgroundService
         SplendidProfileApplier splendidProfileApplier,
         MicController micController,
         PerformanceGpuController performanceGpuController,
-        IOptions<HardwareOptions> options)
+        IOptionsMonitor<HardwareOptions> options)
     {
-        _logger = logger;
-        _hid = hid;
-        _batteryChargeLimiter = batteryChargeLimiter;
-        _brightnessController = brightnessController;
-        _displayController = displayController;
-        _splendidProfileApplier = splendidProfileApplier;
-        _micController = micController;
-        _performanceGpuController = performanceGpuController;
-        _options = options.Value;
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _hid = hid ?? throw new ArgumentNullException(nameof(hid));
+        _batteryChargeLimiter = batteryChargeLimiter ?? throw new ArgumentNullException(nameof(batteryChargeLimiter));
+        _brightnessController = brightnessController ?? throw new ArgumentNullException(nameof(brightnessController));
+        _displayController = displayController ?? throw new ArgumentNullException(nameof(displayController));
+        _splendidProfileApplier = splendidProfileApplier ?? throw new ArgumentNullException(nameof(splendidProfileApplier));
+        _micController = micController ?? throw new ArgumentNullException(nameof(micController));
+        _performanceGpuController = performanceGpuController ?? throw new ArgumentNullException(nameof(performanceGpuController));
+        _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
     /// <summary>
@@ -94,8 +94,8 @@ public sealed class HardwareServiceWorker : BackgroundService
     private Task ApplyConfiguredModesAsync(CancellationToken cancellationToken)
     {
         return _performanceGpuController.ApplyCombinedModeAsync(
-            _options.PerformanceMode,
-            _options.GpuMode,
+            _options.CurrentValue.PerformanceMode,
+            _options.CurrentValue.GpuMode,
             cancellationToken);
     }
 
@@ -241,8 +241,8 @@ public sealed class HardwareServiceWorker : BackgroundService
     {
         _logger.LogInformation("Applying user-session colour profile for session {SessionId}.", sessionId);
 
-        await Task.Delay(_options.ColorProfileDelay, stoppingToken);
-        var started = await _splendidProfileApplier.ApplyProfileAsync(sessionId);
+        await Task.Delay(_options.CurrentValue.ColorProfileDelay, stoppingToken);
+        var started = await _splendidProfileApplier.ApplyProfileAsync(sessionId, stoppingToken);
 
         if (started)
         {

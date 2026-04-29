@@ -51,15 +51,15 @@ public sealed class AsusHidInput
     private static readonly byte[] InitialisationPayload = Encoding.ASCII.GetBytes("ZASUS Tech.Inc.");
 
     private readonly ILogger<AsusHidInput> _logger;
-    private readonly HardwareOptions _options;
+    private readonly IOptionsMonitor<HardwareOptions> _options;
 
     /// <summary>
     /// Initialises a new instance of the <see cref="AsusHidInput"/> class.
     /// </summary>
-    public AsusHidInput(ILogger<AsusHidInput> logger, IOptions<HardwareOptions> options)
+    public AsusHidInput(ILogger<AsusHidInput> logger, IOptionsMonitor<HardwareOptions> options)
     {
-        _logger = logger;
-        _options = options.Value;
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
     /// <summary>
@@ -79,8 +79,8 @@ public sealed class AsusHidInput
                 inputStream = OpenSupportedInputStream();
                 if (inputStream is null)
                 {
-                    _logger.LogWarning("No ASUS HID input stream found. Retrying in {DelayMs} ms.", _options.RetryDelay);
-                    await Task.Delay(_options.RetryDelay, cancellationToken).ConfigureAwait(false);
+                    _logger.LogWarning("No ASUS HID input stream found. Retrying in {DelayMs} ms.", _options.CurrentValue.RetryDelay);
+                    await Task.Delay(_options.CurrentValue.RetryDelay, cancellationToken).ConfigureAwait(false);
                     continue;
                 }
 
@@ -131,7 +131,7 @@ public sealed class AsusHidInput
                 }
 
                 _logger.LogError(exception, "HID listener loop failed. Retrying.");
-                await Task.Delay(_options.RetryDelay, cancellationToken).ConfigureAwait(false);
+                await Task.Delay(_options.CurrentValue.RetryDelay, cancellationToken).ConfigureAwait(false);
             }
             finally
             {

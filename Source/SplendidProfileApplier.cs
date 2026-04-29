@@ -103,27 +103,28 @@ public sealed class SplendidProfileApplier
     private const int DefaultIntensity = 50;
 
     private readonly ILogger<SplendidProfileApplier> _logger;
-    private readonly HardwareOptions _options;
+    private readonly IOptionsMonitor<HardwareOptions> _options;
 
     /// <summary>
     /// Initialises a new instance of the <see cref="SplendidProfileApplier"/> class.
     /// </summary>
     /// <param name="logger">The logger used for diagnostics and errors.</param>
     /// <param name="options">The configured hardware options.</param>
-    public SplendidProfileApplier(ILogger<SplendidProfileApplier> logger, IOptions<HardwareOptions> options)
+    public SplendidProfileApplier(ILogger<SplendidProfileApplier> logger, IOptionsMonitor<HardwareOptions> options)
     {
-        _logger = logger;
-        _options = options.Value;
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
     /// <summary>
     /// Applies the configured ASUS Splendid initialisation sequence in the specified user session.
     /// </summary>
     /// <param name="sessionId">The interactive Windows session identifier.</param>
+    /// <param name="cancellationToken">A token that cancels inter-command waits.</param>
     /// <returns>
     /// <see langword="true"/> if the full sequence completed successfully; otherwise, <see langword="false"/>.
     /// </returns>
-    public async Task<bool> ApplyProfileAsync(int sessionId)
+    public async Task<bool> ApplyProfileAsync(int sessionId, CancellationToken cancellationToken = default)
     {
         var executablePath = TryGetSplendidExePath();
         if (string.IsNullOrWhiteSpace(executablePath))
@@ -141,7 +142,7 @@ public sealed class SplendidProfileApplier
 
             if (command.DelayAfterCommand)
             {
-                await Task.Delay(_options.ColorProfileCommandDelay);
+                await Task.Delay(_options.CurrentValue.ColorProfileCommandDelay, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -234,14 +235,14 @@ public sealed class SplendidProfileApplier
             new((int)SplendidVisual.Init),
         ];
 
-        if (_options.ColorProfileToDefault)
+        if (_options.CurrentValue.ColorProfileToDefault)
         {
             commands.Add(new((int)SplendidVisual.GamutMode, 0, (int)SplendidGamut.Native));
             commands.Add(new((int)SplendidVisual.Default, 0, DefaultIntensity));
         }
 
-        commands.Add(new((int)SplendidVisual.GamutMode, 0, (int)_options.GamutMode));
-        commands.Add(new((int)_options.VisualMode, 0, _options.ColorTemperature));
+        commands.Add(new((int)SplendidVisual.GamutMode, 0, (int)_options.CurrentValue.GamutMode));
+        commands.Add(new((int)_options.CurrentValue.VisualMode, 0, _options.CurrentValue.ColorTemperature));
 
         return commands;
     }

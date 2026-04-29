@@ -17,7 +17,7 @@ public sealed class MicController
     /// <param name="logger">Logger used for diagnostics.</param>
     public MicController(ILogger<MicController> logger)
     {
-        _logger = logger;
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     /// <summary>

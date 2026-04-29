@@ -21,7 +21,7 @@ public sealed class BrightnessController
     private const int TransitionTimeout = 1;
 
     private readonly ILogger<BrightnessController> _logger;
-    private readonly HardwareOptions _options;
+    private readonly IOptionsMonitor<HardwareOptions> _options;
 
     /// <summary>
     /// Initialises a new instance of the <see cref="BrightnessController"/> class.
@@ -30,10 +30,10 @@ public sealed class BrightnessController
     /// <param name="options">The configured hardware service options.</param>
     public BrightnessController(
         ILogger<BrightnessController> logger,
-        IOptions<HardwareOptions> options)
+        IOptionsMonitor<HardwareOptions> options)
     {
-        _logger = logger;
-        _options = options.Value;
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
     /// <summary>
@@ -117,7 +117,7 @@ public sealed class BrightnessController
     /// </summary>
     public void Increase()
     {
-        Adjust(Math.Abs(_options.BrightnessStep));
+        Adjust(Math.Abs(_options.CurrentValue.BrightnessStep));
     }
 
     /// <summary>
@@ -125,7 +125,7 @@ public sealed class BrightnessController
     /// </summary>
     public void Decrease()
     {
-        Adjust(-Math.Abs(_options.BrightnessStep));
+        Adjust(-Math.Abs(_options.CurrentValue.BrightnessStep));
     }
 
     /// <summary>
