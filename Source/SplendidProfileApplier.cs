@@ -1,4 +1,3 @@
-using System.Management;
 using Microsoft.Extensions.Options;
 
 namespace AsusHardwareService;
@@ -100,7 +99,6 @@ public enum SplendidVisual
 /// </summary>
 public sealed class SplendidProfileApplier
 {
-    private const string DriverName = "ATKWMIACPIIO";
     private const string SplendidExecutableName = "AsusSplendid.exe";
     private const int DefaultIntensity = 50;
 
@@ -158,41 +156,7 @@ public sealed class SplendidProfileApplier
     /// </returns>
     private string? TryGetSplendidExePath()
     {
-        using ManagementObjectSearcher searcher =
-            new($"SELECT Name, PathName FROM Win32_SystemDriver WHERE Name = '{DriverName}'");
-
-        using var results = searcher.Get();
-        var driver = results.Cast<ManagementObject>().FirstOrDefault();
-        if (driver is null)
-        {
-            _logger.LogError("{DriverName} driver not found.", DriverName);
-            return null;
-        }
-
-        var pathName = driver["PathName"]?.ToString();
-        if (string.IsNullOrWhiteSpace(pathName))
-        {
-            _logger.LogError("{DriverName} driver path is empty.", DriverName);
-            return null;
-        }
-
-        var normalisedPath = pathName.Trim().Trim('"');
-        var basePath = Path.GetDirectoryName(normalisedPath);
-        if (string.IsNullOrWhiteSpace(basePath))
-        {
-            _logger.LogError("Could not determine the ASUS driver directory.");
-            return null;
-        }
-
-        var executablePath = Path.Combine(basePath, SplendidExecutableName);
-        if (!File.Exists(executablePath))
-        {
-            _logger.LogError("{ExecutableName} not found at: {Path}", SplendidExecutableName, executablePath);
-            return null;
-        }
-
-        _logger.LogInformation("Resolved {ExecutableName} path: {Path}", SplendidExecutableName, executablePath);
-        return executablePath;
+        return AsusDriverLocator.TryResolveDriverSiblingFile(SplendidExecutableName, _logger);
     }
 
     /// <summary>

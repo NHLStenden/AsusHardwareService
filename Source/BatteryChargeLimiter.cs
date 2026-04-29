@@ -14,7 +14,6 @@ namespace AsusHardwareService;
 /// </remarks>
 public sealed class BatteryChargeLimiter
 {
-    private const string AsusDriverServiceName = "ATKWMIACPIIO";
     private static readonly TimeSpan ServiceStateTimeout = TimeSpan.FromSeconds(30);
 
     private readonly ILogger<BatteryChargeLimiter> _logger;
@@ -56,7 +55,7 @@ public sealed class BatteryChargeLimiter
                 return;
             }
 
-            EnsureServiceRunning(AsusDriverServiceName);
+            EnsureServiceRunning(AsusDriverLocator.DriverServiceName);
 
             using var acpi = _services.GetRequiredService<AsusAcpi>();
             if (!acpi.IsConnected)

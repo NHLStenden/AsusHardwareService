@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using Microsoft.Extensions.Options;
 
 namespace AsusHardwareService;
@@ -241,19 +240,6 @@ public sealed class PerformanceGpuController
     private bool HasGpuModeSupport() => ReadGpuEcoFlag() >= 0;
 
     /// <summary>
-    /// Determines whether the system is currently connected to AC power.
-    /// </summary>
-    private static bool IsPluggedIn()
-    {
-        if (!GetSystemPowerStatus(out var status))
-        {
-            return true;
-        }
-
-        return status.ACLineStatus == 1;
-    }
-
-    /// <summary>
     /// Returns whether an external GPU is connected.
     /// </summary>
     /// <remarks>
@@ -277,7 +263,7 @@ public sealed class PerformanceGpuController
         if (!enableEcoMode)
         {
             await Task.Delay(5000, cancellationToken).ConfigureAwait(false);
-            _logger.LogInformation("GPU Eco mode disabled. AC power connected: {IsPluggedIn}.", IsPluggedIn());
+            _logger.LogInformation("GPU Eco mode disabled. AC power connected: {IsPluggedIn}.", PowerNative.IsOnAcPower());
         }
 
         _logger.LogDebug(
@@ -286,20 +272,4 @@ public sealed class PerformanceGpuController
             _options.GpuMode);
     }
 
-    [DllImport("kernel32.dll")]
-    private static extern bool GetSystemPowerStatus(out SystemPowerStatus systemPowerStatus);
-
-    /// <summary>
-    /// Represents the current Windows power status.
-    /// </summary>
-    [StructLayout(LayoutKind.Sequential)]
-    private struct SystemPowerStatus
-    {
-        public byte ACLineStatus;
-        public byte BatteryFlag;
-        public byte BatteryLifePercent;
-        public byte Reserved1;
-        public int BatteryLifeTime;
-        public int BatteryFullLifeTime;
-    }
 }
