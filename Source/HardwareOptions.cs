@@ -15,7 +15,6 @@ public enum PerformanceMode
     /// </summary>
     Silent = 2,
 }
-
 /// <summary>
 /// ASUS GPU modes supported by this service.
 /// </summary>
@@ -31,7 +30,6 @@ public enum GpuMode
     /// </summary>
     Standard = 1,
 }
-
 /// <summary>
 /// Represents configurable settings for the ASUS hardware service.
 /// </summary>
@@ -44,17 +42,23 @@ public sealed class HardwareOptions
     /// Gets or sets the battery charge limit percentage to apply through the ASUS ACPI interface.
     /// </summary>
     public int ChargeLimit { get; set; } = 60;
-
     /// <summary>
     /// Gets or sets the brightness step size, in percentage points.
     /// </summary>
     public int BrightnessStep { get; set; } = 10;
 
     /// <summary>
+    /// Gets or sets the fallback keyboard backlight level used when the current hardware level cannot be read.
+    /// </summary>
+    /// <remarks>
+    /// ASUS keyboard backlight levels range from <c>0</c> (off) to <c>3</c> (maximum).
+    /// </remarks>
+    public int KeyboardBacklightFallbackLevel { get; set; } = 1;
+
+    /// <summary>
     /// Gets or sets the delay, in milliseconds, before retrying ASUS HID device discovery after a failure.
     /// </summary>
     public int RetryDelay { get; set; } = 1500;
-
     /// <summary>
     /// Gets or sets the laptop panel refresh-rate and overdrive preset to apply.
     /// </summary>
@@ -64,7 +68,6 @@ public sealed class HardwareOptions
     /// Gets or sets the MiniLED backlight zone mode to apply.
     /// </summary>
     public MiniLedMode MiniLedMode { get; set; } = MiniLedMode.MultiZone;
-
     /// <summary>
     /// Gets or sets a value indicating whether brightness changes should be broadcast to a per-user helper.
     /// </summary>
@@ -74,7 +77,6 @@ public sealed class HardwareOptions
     /// Gets or sets a value indicating whether the colour profile should be reset to default.
     /// </summary>
     public bool ColorProfileToDefault { get; set; }
-
     /// <summary>
     /// Gets or sets the visual mode to apply.
     /// </summary>
@@ -84,7 +86,6 @@ public sealed class HardwareOptions
     /// Gets or sets the gamut mode to apply.
     /// </summary>
     public SplendidGamut GamutMode { get; set; } = SplendidGamut.Native;
-
     /// <summary>
     /// Gets or sets the colour temperature to apply.
     /// </summary>
@@ -93,7 +94,6 @@ public sealed class HardwareOptions
     /// <c>70</c>, <c>85</c>, and <c>100</c>. A value of <c>50</c> is neutral.
     /// </remarks>
     public int ColorTemperature { get; set; } = 50;
-
     /// <summary>
     /// Gets or sets the delay, in milliseconds, before applying the colour profile after a session change.
     /// </summary>
@@ -103,7 +103,6 @@ public sealed class HardwareOptions
     /// Gets or sets the delay, in milliseconds, before calling the Splendid command.
     /// </summary>
     public int ColorProfileCommandDelay { get; set; } = 1000;
-
     /// <summary>
     /// Gets or sets the configured performance mode.
     /// </summary>

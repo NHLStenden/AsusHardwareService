@@ -21,7 +21,6 @@ public enum SplendidGamut
     /// Uses the DCI-P3 gamut.
     /// </summary>
     DciP3 = 53,
-
     /// <summary>
     /// Uses the Display P3 gamut.
     /// </summary>
@@ -47,7 +46,6 @@ public enum SplendidVisual
     /// Uses the default visual preset.
     /// </summary>
     Default = 11,
-
     /// <summary>
     /// Uses the racing visual preset.
     /// </summary>
@@ -72,7 +70,6 @@ public enum SplendidVisual
     /// Uses the cinema visual preset.
     /// </summary>
     Cinema = 25,
-
     /// <summary>
     /// Uses the vivid visual preset.
     /// </summary>
@@ -93,7 +90,6 @@ public enum SplendidVisual
     /// </summary>
     Disabled = 18,
 }
-
 /// <summary>
 /// Locates and launches ASUS Splendid display color commands inside a user session.
 /// </summary>
@@ -104,7 +100,6 @@ public sealed class SplendidProfileApplier
 
     private readonly ILogger<SplendidProfileApplier> _logger;
     private readonly IOptionsMonitor<HardwareOptions> _options;
-
     /// <summary>
     /// Initialises a new instance of the <see cref="SplendidProfileApplier"/> class.
     /// </summary>
@@ -115,7 +110,6 @@ public sealed class SplendidProfileApplier
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _options = options ?? throw new ArgumentNullException(nameof(options));
     }
-
     /// <summary>
     /// Applies the configured ASUS Splendid initialisation sequence in the specified user session.
     /// </summary>
@@ -131,7 +125,6 @@ public sealed class SplendidProfileApplier
         {
             return false;
         }
-
         var commands = BuildCommandSequence();
         foreach (var command in commands)
         {
@@ -145,7 +138,6 @@ public sealed class SplendidProfileApplier
                 await Task.Delay(_options.CurrentValue.ColorProfileCommandDelay, cancellationToken).ConfigureAwait(false);
             }
         }
-
         return true;
     }
 
@@ -159,7 +151,6 @@ public sealed class SplendidProfileApplier
     {
         return AsusDriverLocator.TryResolveDriverSiblingFile(SplendidExecutableName, _logger);
     }
-
     /// <summary>
     /// Launches a single ASUS Splendid command in the specified user session.
     /// </summary>
@@ -181,7 +172,6 @@ public sealed class SplendidProfileApplier
         int? param3 = null)
     {
         var arguments = BuildArguments(command, param1, param2, param3);
-
         _logger.LogInformation(
             "Launching ASUS Splendid in session {SessionId}: \"{ExecutablePath}\" {Arguments}",
             sessionId,
@@ -190,7 +180,6 @@ public sealed class SplendidProfileApplier
 
         return SessionProcessLauncher.TryStartProcessInSession(sessionId, executablePath, arguments, _logger);
     }
-
     /// <summary>
     /// Builds the command-line argument string for an ASUS Splendid command.
     /// </summary>
@@ -206,7 +195,6 @@ public sealed class SplendidProfileApplier
         int? param3)
     {
         List<string> parts = [command.ToString()];
-
         if (param1.HasValue)
         {
             parts.Add(param1.Value.ToString());
@@ -224,7 +212,6 @@ public sealed class SplendidProfileApplier
 
         return string.Join(" ", parts);
     }
-
     /// <summary>
     /// Builds the ordered ASUS Splendid command sequence for the configured colour profile.
     /// </summary>
@@ -234,7 +221,6 @@ public sealed class SplendidProfileApplier
         List<SplendidCommand> commands = [
             new((int)SplendidVisual.Init),
         ];
-
         if (_options.CurrentValue.ColorProfileToDefault)
         {
             commands.Add(new((int)SplendidVisual.GamutMode, 0, (int)SplendidGamut.Native));
@@ -246,7 +232,6 @@ public sealed class SplendidProfileApplier
 
         return commands;
     }
-
     /// <summary>
     /// Represents a single ASUS Splendid command invocation.
     /// </summary>

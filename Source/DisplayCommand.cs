@@ -1,5 +1,4 @@
 namespace AsusHardwareService;
-
 /// <summary>
 /// Handles display-related command-line invocations that must run inside the interactive user session.
 /// </summary>
@@ -14,7 +13,6 @@ internal static class DisplayCommand
     /// Main command name used to enter display command mode.
     /// </summary>
     public const string CommandName = "display";
-
     /// <summary>
     /// Subcommand for laptop panel refresh-rate control.
     /// </summary>
@@ -29,12 +27,10 @@ internal static class DisplayCommand
     /// Screen mode that requests 60 Hz.
     /// </summary>
     public const string ScreenMode60Hz = "60";
-
     /// <summary>
     /// Screen mode that requests 240 Hz and asks the service to use overdrive.
     /// </summary>
     public const string ScreenMode240HzOverdrive = "240-od";
-
     /// <summary>
     /// Tries to handle the supplied process arguments as a display command.
     /// </summary>
@@ -44,7 +40,6 @@ internal static class DisplayCommand
     public static bool TryHandle(string[] args, out int exitCode)
     {
         exitCode = 0;
-
         if (args.Length == 0 || !args[0].Equals(CommandName, StringComparison.OrdinalIgnoreCase))
         {
             return false;
@@ -53,7 +48,6 @@ internal static class DisplayCommand
         exitCode = Run(args[1..]);
         return true;
     }
-
     /// <summary>
     /// Runs a display command.
     /// </summary>
@@ -68,7 +62,6 @@ internal static class DisplayCommand
                 WriteUsage();
                 return 2;
             }
-
             return args[0].ToLowerInvariant() switch
             {
                 ScreenCommandName => ApplyScreen(args),
@@ -82,7 +75,6 @@ internal static class DisplayCommand
             return 1;
         }
     }
-
     private static int ApplyScreen(string[] args)
     {
         if (args.Length < 2)
@@ -100,14 +92,12 @@ internal static class DisplayCommand
             ScreenMode240HzOverdrive => 240,
             _ => -1,
         };
-
         if (targetHz < 0)
         {
             Console.Error.WriteLine($"Unknown screen mode: {args[1]}");
             WriteUsage();
             return 2;
         }
-
         var display = ScreenNative.FindLaptopScreen(requireActive: true, preferredRefreshRate: targetHz);
         if (display is null)
         {
@@ -119,7 +109,6 @@ internal static class DisplayCommand
 
             return 3;
         }
-
         var currentHz = ScreenNative.GetRefreshRate(display);
         if (currentHz == targetHz)
         {
@@ -132,7 +121,6 @@ internal static class DisplayCommand
 
         return changed ? 0 : 4;
     }
-
     private static int DumpDisplays()
     {
         foreach (var line in ScreenNative.DumpDisplays())
@@ -149,7 +137,6 @@ internal static class DisplayCommand
         WriteUsage();
         return 2;
     }
-
     private static void WriteUsage()
     {
         Console.Error.WriteLine("Usage:");

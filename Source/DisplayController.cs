@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Options;
 
 namespace AsusHardwareService;
-
 /// <summary>
 /// Applies display-related ASUS hardware settings.
 /// </summary>
@@ -15,7 +14,6 @@ public sealed class DisplayController
     private readonly AsusAcpi _acpi;
     private readonly ILogger<DisplayController> _logger;
     private readonly IOptionsMonitor<HardwareOptions> _options;
-
     /// <summary>
     /// Initialises a new instance of the <see cref="DisplayController"/> class.
     /// </summary>
@@ -31,7 +29,6 @@ public sealed class DisplayController
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _options = options ?? throw new ArgumentNullException(nameof(options));
     }
-
     /// <summary>
     /// Applies display settings that can safely run from the Windows service session.
     /// </summary>
@@ -42,7 +39,6 @@ public sealed class DisplayController
     public void ApplyConfiguredServiceDisplaySettings()
     {
         var options = _options.CurrentValue;
-
         _logger.LogInformation(
             "Applying service display settings. LaptopScreenMode={LaptopScreenMode}, MiniLedMode={MiniLedMode}",
             options.LaptopScreenMode,
@@ -51,7 +47,6 @@ public sealed class DisplayController
         ApplyConfiguredOverdriveMode();
         ApplyMiniLedMode(options.MiniLedMode);
     }
-
     /// <summary>
     /// Applies the configured laptop screen mode in the specified interactive user session.
     /// </summary>
@@ -61,7 +56,6 @@ public sealed class DisplayController
     {
         return ApplyLaptopScreenMode(_options.CurrentValue.LaptopScreenMode, session);
     }
-
     /// <summary>
     /// Applies the configured MiniLED setting only.
     /// </summary>
@@ -69,7 +63,6 @@ public sealed class DisplayController
     {
         ApplyMiniLedMode(_options.CurrentValue.MiniLedMode);
     }
-
     /// <summary>
     /// Applies the configured panel overdrive setting only.
     /// </summary>
@@ -86,7 +79,6 @@ public sealed class DisplayController
 
         SetOverdrive(overdrive);
     }
-
     /// <summary>
     /// Applies the requested laptop panel refresh-rate and overdrive mode.
     /// </summary>
@@ -103,7 +95,6 @@ public sealed class DisplayController
             _ => UnknownLaptopScreenMode(mode),
         };
     }
-
     /// <summary>
     /// Applies the requested MiniLED backlight zone mode.
     /// </summary>
@@ -118,7 +109,6 @@ public sealed class DisplayController
         var started = RunSelfInUserSession(
             session,
             $"{DisplayCommand.CommandName} {DisplayCommand.ScreenCommandName} {DisplayCommand.ScreenModeAuto}");
-
         SetOverdrive(PowerNative.IsOnAcPower() ? 1 : 0);
         return started;
     }
@@ -132,13 +122,11 @@ public sealed class DisplayController
         SetOverdrive(overdrive);
         return started;
     }
-
     private bool UnknownLaptopScreenMode(LaptopScreenMode mode)
     {
         _logger.LogWarning("Unknown laptop screen mode: {Mode}", mode);
         return false;
     }
-
     private void SetOverdrive(int overdrive)
     {
         try
@@ -149,7 +137,6 @@ public sealed class DisplayController
                 _logger.LogInformation("Screen overdrive already has requested value {Overdrive}.", overdrive);
                 return;
             }
-
             _acpi.SetDeviceValue(AsusAcpi.ScreenOverdrive, overdrive, "ScreenOverdrive");
         }
         catch (Exception ex)
@@ -157,7 +144,6 @@ public sealed class DisplayController
             _logger.LogError(ex, "Failed to set screen overdrive to {Overdrive}.", overdrive);
         }
     }
-
     private int? TryGetAdjustedDeviceValue(uint deviceId, string logName)
     {
         try
@@ -170,7 +156,6 @@ public sealed class DisplayController
             return null;
         }
     }
-
     private void SetMiniLed(MiniLedMode mode)
     {
         var threeStateValue = ToMiniLed2Value(mode);
@@ -184,7 +169,6 @@ public sealed class DisplayController
             _logger.LogWarning(
                 "MiniLED2 did not accept MultiZoneStrong. Falling back to MiniLED1 MultiZone, because MiniLED1 has no strong mode.");
         }
-
         var twoStateValue = ToMiniLed1Value(mode);
         if (TryWriteMiniLedEndpoint(AsusAcpi.ScreenMiniled1, twoStateValue, "MiniLED1", mode, sleepAfterWrite: false))
         {
@@ -193,7 +177,6 @@ public sealed class DisplayController
 
         _logger.LogWarning("No supported MiniLED ACPI endpoint accepted mode {Mode}.", mode);
     }
-
     private static int ToMiniLed1Value(MiniLedMode mode)
     {
         return mode switch
@@ -204,7 +187,6 @@ public sealed class DisplayController
             _ => 1,
         };
     }
-
     private static int ToMiniLed2Value(MiniLedMode mode)
     {
         return mode switch
@@ -215,7 +197,6 @@ public sealed class DisplayController
             _ => 0,
         };
     }
-
     private bool TryWriteMiniLedEndpoint(
         uint endpoint,
         int endpointValue,
@@ -234,7 +215,6 @@ public sealed class DisplayController
                     requestedMode,
                     endpointValue,
                     result);
-
                 return false;
             }
 
@@ -248,7 +228,6 @@ public sealed class DisplayController
                 requestedMode,
                 name,
                 endpointValue);
-
             return true;
         }
         catch (Exception ex)
@@ -263,7 +242,6 @@ public sealed class DisplayController
             return false;
         }
     }
-
     private bool RunSelfInUserSession(SessionInfo session, string arguments)
     {
         var executablePath = ResolveCurrentExecutablePath();
@@ -272,7 +250,6 @@ public sealed class DisplayController
             _logger.LogError("Could not resolve current executable path. ResolvedPath={ExecutablePath}", executablePath);
             return false;
         }
-
         _logger.LogInformation(
             "Starting display command in session {SessionId}: {Path} {Arguments}",
             session.SessionId,
@@ -284,7 +261,6 @@ public sealed class DisplayController
             executablePath,
             arguments,
             _logger);
-
         if (!started)
         {
             _logger.LogWarning("Failed to start display command in session {SessionId}.", session.SessionId);
@@ -299,7 +275,6 @@ public sealed class DisplayController
             ?? System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
     }
 }
-
 /// <summary>
 /// Laptop panel refresh-rate and overdrive presets.
 /// </summary>
@@ -320,7 +295,6 @@ public enum LaptopScreenMode
     /// </summary>
     Hz240Overdrive,
 }
-
 /// <summary>
 /// MiniLED backlight zone modes.
 /// </summary>
@@ -335,7 +309,6 @@ public enum MiniLedMode
     /// Disables local dimming by treating the MiniLED panel as one uniform lighting zone.
     /// </summary>
     OneZone,
-
     /// <summary>
     /// Enables normal local dimming with multiple lighting zones.
     /// </summary>

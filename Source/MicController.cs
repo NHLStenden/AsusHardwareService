@@ -10,7 +10,6 @@ public sealed class MicController
     private static readonly Role[] CaptureRoles = [Role.Communications, Role.Console, Role.Multimedia];
 
     private readonly ILogger<MicController> _logger;
-
     /// <summary>
     /// Initialises a new instance of the <see cref="MicController"/> class.
     /// </summary>
@@ -26,7 +25,6 @@ public sealed class MicController
     public void Toggle()
     {
         using var enumerator = new MMDeviceEnumerator();
-
         var devices = CaptureRoles
             .Select(role => TryGetDefaultAudioEndpoint(enumerator, role))
             .OfType<MMDevice>()
@@ -38,7 +36,6 @@ public sealed class MicController
             _logger.LogWarning("No default capture devices were found to toggle microphone mute.");
             return;
         }
-
         var newMuteState = !devices[0].AudioEndpointVolume.Mute;
         foreach (var device in devices)
         {
@@ -53,7 +50,6 @@ public sealed class MicController
             newMuteState ? "Muted" : "Unmuted",
             devices.Count);
     }
-
     /// <summary>
     /// Tries to resolve the default capture endpoint for the specified role.
     /// </summary>

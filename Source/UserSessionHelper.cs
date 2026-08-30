@@ -16,7 +16,6 @@ public sealed record SessionInfo
     /// Gets the user name associated with the session.
     /// </summary>
     public required string UserName { get; init; }
-
     /// <summary>
     /// Gets the domain associated with the session.
     /// </summary>
@@ -32,7 +31,6 @@ public static class UserSessionHelper
 
     [DllImport("kernel32.dll")]
     private static extern uint WTSGetActiveConsoleSessionId();
-
     [DllImport("Wtsapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern bool WTSQuerySessionInformation(
         IntPtr hServer,
@@ -43,7 +41,6 @@ public static class UserSessionHelper
 
     [DllImport("Wtsapi32.dll")]
     private static extern void WTSFreeMemory(IntPtr pointer);
-
     /// <summary>
     /// Tries to retrieve the currently active interactive user session.
     /// </summary>
@@ -58,7 +55,6 @@ public static class UserSessionHelper
         {
             return null;
         }
-
         var activeSessionId = (int)sessionId;
         if (QueryConnectState(activeSessionId) != WtsConnectStateClass.WTSActive)
         {
@@ -70,7 +66,6 @@ public static class UserSessionHelper
         {
             return null;
         }
-
         return new SessionInfo
         {
             SessionId = activeSessionId,
@@ -78,7 +73,6 @@ public static class UserSessionHelper
             Domain = QueryString(activeSessionId, WtsInfoClass.WTSDomainName),
         };
     }
-
 
     /// <summary>
     /// Waits until an active interactive user session is available.
@@ -100,13 +94,11 @@ public static class UserSessionHelper
             {
                 return session;
             }
-
             await Task.Delay(pollingInterval, cancellationToken);
         }
 
         return null;
     }
-
     /// <summary>
     /// Reads a Unicode string value from WTS session information.
     /// </summary>
@@ -119,7 +111,6 @@ public static class UserSessionHelper
         {
             return string.Empty;
         }
-
         try
         {
             return Marshal.PtrToStringUni(buffer) ?? string.Empty;
@@ -129,7 +120,6 @@ public static class UserSessionHelper
             WTSFreeMemory(buffer);
         }
     }
-
     /// <summary>
     /// Reads the connection state for a Windows session.
     /// </summary>
@@ -141,7 +131,6 @@ public static class UserSessionHelper
         {
             return WtsConnectStateClass.WTSDown;
         }
-
         try
         {
             return (WtsConnectStateClass)Marshal.ReadInt32(buffer);
@@ -161,7 +150,6 @@ public static class UserSessionHelper
         WTSDomainName = 7,
         WTSConnectState = 8,
     }
-
     /// <summary>
     /// Defines the connection states returned by the WTS API.
     /// </summary>

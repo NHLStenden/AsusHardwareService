@@ -11,7 +11,6 @@ internal static class AsusDriverLocator
     /// ASUS ACPI driver service name used by the ASUS hardware endpoints.
     /// </summary>
     public const string DriverServiceName = "ATKWMIACPIIO";
-
     /// <summary>
     /// Tries to resolve a file located next to the installed ASUS ACPI driver binary.
     /// </summary>
@@ -25,7 +24,6 @@ internal static class AsusDriverLocator
         {
             return null;
         }
-
         var filePath = Path.Combine(driverDirectory, fileName);
         if (File.Exists(filePath))
         {
@@ -36,7 +34,6 @@ internal static class AsusDriverLocator
         logger.LogError("ASUS driver companion file {FileName} was not found at {Path}.", fileName, filePath);
         return null;
     }
-
     /// <summary>
     /// Tries to resolve the directory that contains the installed ASUS ACPI driver binary.
     /// </summary>
@@ -46,7 +43,6 @@ internal static class AsusDriverLocator
     {
         using ManagementObjectSearcher searcher = new(
             $"SELECT Name, PathName FROM Win32_SystemDriver WHERE Name = '{DriverServiceName}'");
-
         using var results = searcher.Get();
         var driver = results.Cast<ManagementObject>().FirstOrDefault();
         if (driver is null)
@@ -61,7 +57,6 @@ internal static class AsusDriverLocator
             logger.LogError("{DriverName} driver path is empty.", DriverServiceName);
             return null;
         }
-
         var normalisedPath = pathName.Trim().Trim('"');
         var driverDirectory = Path.GetDirectoryName(normalisedPath);
         if (string.IsNullOrWhiteSpace(driverDirectory))

@@ -5,7 +5,6 @@ using HidSharp.Reports;
 using Microsoft.Extensions.Options;
 
 namespace AsusHardwareService;
-
 /// <summary>
 /// Listens for ASUS specific HID hotkey events.
 /// </summary>
@@ -19,12 +18,10 @@ public sealed class AsusHidInput
     /// ASUS USB vendor identifier.
     /// </summary>
     public const int AsusVendorId = 0x0b05;
-
     /// <summary>
     /// ASUS HID report identifier used by supported hotkey devices.
     /// </summary>
     public const byte InputReportId = 0x5a;
-
     private const byte IgnoredEventId = 236;
     private static readonly FrozenSet<int> SupportedProductIds = new[]
     {
@@ -47,12 +44,10 @@ public sealed class AsusHidInput
         0x1b2c,
         0x8854,
     }.ToFrozenSet();
-
     private static readonly byte[] InitialisationPayload = Encoding.ASCII.GetBytes("ZASUS Tech.Inc.");
 
     private readonly ILogger<AsusHidInput> _logger;
     private readonly IOptionsMonitor<HardwareOptions> _options;
-
     /// <summary>
     /// Initialises a new instance of the <see cref="AsusHidInput"/> class.
     /// </summary>
@@ -61,7 +56,6 @@ public sealed class AsusHidInput
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _options = options ?? throw new ArgumentNullException(nameof(options));
     }
-
     /// <summary>
     /// Starts listening for HID events and invokes <paramref name="onEvent"/> for each recognised ASUS event.
     /// </summary>
@@ -73,7 +67,6 @@ public sealed class AsusHidInput
         {
             HidStream? inputStream = null;
             CancellationTokenRegistration cancellationRegistration = default;
-
             try
             {
                 inputStream = OpenSupportedInputStream();
@@ -85,10 +78,8 @@ public sealed class AsusHidInput
                 }
 
                 InitialiseSupportedDevices();
-
                 _logger.LogInformation("Listening on HID path: {Path}", inputStream.Device.DevicePath);
                 inputStream.ReadTimeout = Timeout.Infinite;
-
                 cancellationRegistration = cancellationToken.Register(
                     static state =>
                     {
@@ -101,7 +92,6 @@ public sealed class AsusHidInput
                         }
                     },
                     inputStream);
-
                 while (!cancellationToken.IsCancellationRequested)
                 {
                     var report = inputStream.Read();
@@ -109,7 +99,6 @@ public sealed class AsusHidInput
                     {
                         continue;
                     }
-
                     _logger.LogInformation("ASUS HID event: {EventId}", eventId);
                     await onEvent(eventId).ConfigureAwait(false);
                 }
@@ -129,7 +118,6 @@ public sealed class AsusHidInput
                 {
                     break;
                 }
-
                 _logger.LogError(exception, "HID listener loop failed. Retrying.");
                 await Task.Delay(_options.CurrentValue.RetryDelay, cancellationToken).ConfigureAwait(false);
             }
@@ -140,7 +128,62 @@ public sealed class AsusHidInput
             }
         }
     }
+    /// <summary>
+    /// Sets the ASUS keyboard backlight brightness through the vendor HID feature report.
+    /// </summary>
+    /// <param name="level">The keyboard backlight level from <c>0</c> (off) through <c>3</c> (maximum).</param>
+    /// <returns><c>true</c> when the command was sent to at least one supported ASUS HID device.</returns>
+    public bool TrySetKeyboardBacklight(int level)
+    {
+        if (level is < 0 or > 3)
+        {
+            throw new ArgumentOutOfRangeException(nameof(level), level, "Keyboard backlight level must be between 0 and 3.");
+        }
 
+        byte[] command = [InputReportId, 0xBA, 0xC5, 0xC4, (byte)level];
+        var sent = false;
+
+        foreach (var device in DeviceList.Local.GetHidDevices(AsusVendorId))
+        {
+            try
+            {
+                if (!IsSupportedInputDevice(device))
+                {
+                    continue;
+                }
+
+                var reportLength = device.GetMaxFeatureReportLength();
+                if (reportLength < command.Length)
+                {
+                    _logger.LogDebug(
+                        "Skipping ASUS HID device PID={Pid:X}: feature report length {Length} is too small for keyboard backlight command.",
+                        device.ProductID,
+                        reportLength);
+                    continue;
+                }
+
+                using var stream = device.Open();
+                var featureBuffer = new byte[reportLength];
+                Array.Copy(command, featureBuffer, command.Length);
+                stream.SetFeature(featureBuffer);
+
+                _logger.LogInformation(
+                    "Keyboard backlight set to level {Level} through ASUS HID device PID={Pid:X}.",
+                    level,
+                    device.ProductID);
+                sent = true;
+            }
+            catch (Exception exception)
+            {
+                _logger.LogDebug(
+                    exception,
+                    "Keyboard backlight command failed for ASUS HID device PID={Pid:X}.",
+                    device.ProductID);
+            }
+        }
+
+        return sent;
+    }
     /// <summary>
     /// Opens the first supported ASUS HID input stream.
     /// </summary>
@@ -154,7 +197,6 @@ public sealed class AsusHidInput
                 {
                     continue;
                 }
-
                 _logger.LogInformation("Candidate ASUS HID device: PID={Pid:X} Path={Path}", device.ProductID, device.DevicePath);
                 return device.Open();
             }
@@ -166,7 +208,6 @@ public sealed class AsusHidInput
 
         return null;
     }
-
     /// <summary>
     /// Sends the ASUS initialisation payload to all supported devices.
     /// </summary>
@@ -180,7 +221,6 @@ public sealed class AsusHidInput
                 {
                     continue;
                 }
-
                 using var stream = device.Open();
                 var featureBuffer = new byte[device.GetMaxFeatureReportLength()];
                 Array.Copy(InitialisationPayload, featureBuffer, InitialisationPayload.Length);
@@ -192,7 +232,6 @@ public sealed class AsusHidInput
             }
         }
     }
-
     /// <summary>
     /// Returns whether the supplied HID device matches the requirements for this listener.
     /// </summary>
@@ -201,7 +240,6 @@ public sealed class AsusHidInput
         device.CanOpen &&
         device.GetMaxFeatureReportLength() > 0 &&
         device.GetReportDescriptor().TryGetReport(ReportType.Feature, InputReportId, out _);
-
     /// <summary>
     /// Tries to extract an ASUS hotkey event identifier from a raw report.
     /// </summary>
@@ -219,7 +257,6 @@ public sealed class AsusHidInput
         {
             return false;
         }
-
         eventId = candidateEventId;
         return true;
     }

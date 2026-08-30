@@ -2,7 +2,6 @@ using System.Management;
 using Microsoft.Extensions.Options;
 
 namespace AsusHardwareService;
-
 /// <summary>
 /// Provides access to the built-in laptop panel brightness through Windows Management Instrumentation (WMI).
 /// </summary>
@@ -19,10 +18,8 @@ public sealed class BrightnessController
     private const string CurrentBrightnessPropertyName = "CurrentBrightness";
     private const string SetBrightnessMethodName = "WmiSetBrightness";
     private const int TransitionTimeout = 1;
-
     private readonly ILogger<BrightnessController> _logger;
     private readonly IOptionsMonitor<HardwareOptions> _options;
-
     /// <summary>
     /// Initialises a new instance of the <see cref="BrightnessController"/> class.
     /// </summary>
@@ -35,7 +32,6 @@ public sealed class BrightnessController
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _options = options ?? throw new ArgumentNullException(nameof(options));
     }
-
     /// <summary>
     /// Gets the current brightness of the built-in laptop display.
     /// </summary>
@@ -47,7 +43,6 @@ public sealed class BrightnessController
     {
         using var brightnessClass = CreateManagementClass(BrightnessClassName);
         using var instances = brightnessClass.GetInstances();
-
         foreach (ManagementObject instance in instances)
         {
             using (instance)
@@ -59,7 +54,6 @@ public sealed class BrightnessController
         throw new InvalidOperationException(
             "No WMI monitor brightness instance was found. This only works for the built in laptop panel.");
     }
-
     /// <summary>
     /// Sets the brightness of the built-in laptop display.
     /// </summary>
@@ -70,7 +64,6 @@ public sealed class BrightnessController
     public void Set(int brightness)
     {
         brightness = Math.Clamp(brightness, 0, 100);
-
         using var methodsClass = CreateManagementClass(BrightnessMethodsClassName);
         using var instances = methodsClass.GetInstances();
 
@@ -85,7 +78,6 @@ public sealed class BrightnessController
                 changed = true;
             }
         }
-
         if (!changed)
         {
             throw new InvalidOperationException("No WMI monitor brightness method instance was found.");
@@ -93,7 +85,6 @@ public sealed class BrightnessController
 
         _logger.LogInformation("Brightness set to {Brightness}%.", brightness);
     }
-
     /// <summary>
     /// Adjusts the current brightness by the specified delta.
     /// </summary>
@@ -108,7 +99,6 @@ public sealed class BrightnessController
             _logger.LogDebug("Brightness already at boundary: {Brightness}%.", current);
             return;
         }
-
         Set(next);
     }
 
@@ -127,7 +117,6 @@ public sealed class BrightnessController
     {
         Adjust(-Math.Abs(_options.CurrentValue.BrightnessStep));
     }
-
     /// <summary>
     /// Creates a WMI management class connected to the ASUS brightness namespace.
     /// </summary>
@@ -137,7 +126,6 @@ public sealed class BrightnessController
     {
         var scope = new ManagementScope(WmiNamespace);
         scope.Connect();
-
         return new ManagementClass(scope, new ManagementPath(className), null);
     }
 }

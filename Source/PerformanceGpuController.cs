@@ -16,7 +16,6 @@ public enum GpuChangeResult
     /// The GPU mode changed successfully.
     /// </summary>
     Changed,
-
     /// <summary>
     /// The GPU mode changed, but a restart is required before it takes full effect.
     /// </summary>
@@ -37,7 +36,6 @@ public enum GpuChangeResult
     /// </summary>
     Unsupported,
 }
-
 /// <summary>
 /// Applies and tracks the combined ASUS performance mode and GPU mode.
 /// </summary>
@@ -51,7 +49,6 @@ public sealed class PerformanceGpuController
     private readonly IServiceProvider _services;
     private readonly ILogger<PerformanceGpuController> _logger;
     private readonly IOptionsMonitor<HardwareOptions> _options;
-
     /// <summary>
     /// Initialises a new instance of the <see cref="PerformanceGpuController"/> class.
     /// </summary>
@@ -64,7 +61,6 @@ public sealed class PerformanceGpuController
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _options = options ?? throw new ArgumentNullException(nameof(options));
     }
-
     /// <summary>
     /// Gets the last performance mode applied or observed by the service.
     /// </summary>
@@ -74,13 +70,11 @@ public sealed class PerformanceGpuController
     /// Gets the last GPU mode applied or observed by the service.
     /// </summary>
     public GpuMode CurrentGpuMode { get; private set; } = GpuMode.Standard;
-
     /// <summary>
     /// Returns the currently tracked performance and GPU mode pair.
     /// </summary>
     public (PerformanceMode performanceMode, GpuMode gpuMode) GetCurrentCombinedMode() =>
         (CurrentPerformanceMode, CurrentGpuMode);
-
     /// <summary>
     /// Returns the next mode pair in the service toggle cycle.
     /// </summary>
@@ -90,7 +84,6 @@ public sealed class PerformanceGpuController
         performanceMode == PerformanceMode.Silent && gpuMode == GpuMode.Eco
             ? (PerformanceMode.Balanced, GpuMode.Standard)
             : (PerformanceMode.Silent, GpuMode.Eco);
-
     /// <summary>
     /// Switches to the next combined performance and GPU mode pair.
     /// </summary>
@@ -101,7 +94,6 @@ public sealed class PerformanceGpuController
 
         await ApplyCombinedModeAsync(nextMode.performanceMode, nextMode.gpuMode, cancellationToken).ConfigureAwait(false);
     }
-
     /// <summary>
     /// Applies a combined performance and GPU mode pair.
     /// </summary>
@@ -117,7 +109,6 @@ public sealed class PerformanceGpuController
                 "Applying combined mode {PerformanceMode}/{GpuMode}.",
                 performanceMode,
                 gpuMode);
-
             var performanceResult = SetPerformanceMode(performanceMode);
             if (performanceResult != 1)
             {
@@ -126,7 +117,6 @@ public sealed class PerformanceGpuController
                     performanceMode,
                     performanceResult);
             }
-
             var gpuResult = await SetGpuModeAsync(gpuMode, cancellationToken).ConfigureAwait(false);
             if (gpuResult is not (GpuChangeResult.Changed or GpuChangeResult.NoChange))
             {
@@ -135,7 +125,6 @@ public sealed class PerformanceGpuController
                     gpuMode,
                     gpuResult);
             }
-
             CurrentPerformanceMode = performanceMode;
             CurrentGpuMode = gpuMode;
         }
@@ -153,7 +142,6 @@ public sealed class PerformanceGpuController
         using var acpi = _services.GetRequiredService<AsusAcpi>();
         return acpi.IsConnected ? acpi.GetDeviceValue(AsusAcpi.GpuEcoRog, "GpuEco") : -1;
     }
-
     /// <summary>
     /// Reads the raw GPU MUX flag from ASUS ACPI.
     /// </summary>
@@ -162,7 +150,6 @@ public sealed class PerformanceGpuController
         using var acpi = _services.GetRequiredService<AsusAcpi>();
         return acpi.IsConnected ? acpi.GetDeviceValue(AsusAcpi.GpuMuxRog, "GpuMux") : -1;
     }
-
     /// <summary>
     /// Writes the raw Eco flag through ASUS ACPI.
     /// </summary>
@@ -171,7 +158,6 @@ public sealed class PerformanceGpuController
         using var acpi = _services.GetRequiredService<AsusAcpi>();
         return acpi.IsConnected ? acpi.SetDeviceValue(AsusAcpi.GpuEcoRog, ecoFlag, "GpuEco") : -1;
     }
-
     /// <summary>
     /// Writes the ASUS performance mode.
     /// </summary>
@@ -180,7 +166,6 @@ public sealed class PerformanceGpuController
         using var acpi = _services.GetRequiredService<AsusAcpi>();
         return acpi.IsConnected ? acpi.SetDeviceValue(AsusAcpi.PerformanceMode, (int)mode, nameof(PerformanceMode)) : -1;
     }
-
     /// <summary>
     /// Applies the requested GPU mode according to the service transition rules.
     /// </summary>
@@ -198,7 +183,6 @@ public sealed class PerformanceGpuController
         {
             return GpuChangeResult.NoChange;
         }
-
         if (targetMode == GpuMode.Eco)
         {
             if (IsExternalGpuConnected())
@@ -210,7 +194,6 @@ public sealed class PerformanceGpuController
             CurrentGpuMode = GpuMode.Eco;
             return GpuChangeResult.Changed;
         }
-
         await ApplyEcoModeTransitionAsync(enableEcoMode: false, cancellationToken).ConfigureAwait(false);
         CurrentGpuMode = GpuMode.Standard;
         return GpuChangeResult.Changed;
@@ -226,7 +209,6 @@ public sealed class PerformanceGpuController
             CurrentGpuMode = GpuMode.Standard;
             return CurrentGpuMode;
         }
-
         var ecoFlag = ReadGpuEcoFlag();
         _ = ReadGpuMuxFlag();
 
@@ -238,7 +220,6 @@ public sealed class PerformanceGpuController
     /// Determines whether GPU mode control is available on the current device.
     /// </summary>
     private bool HasGpuModeSupport() => ReadGpuEcoFlag() >= 0;
-
     /// <summary>
     /// Returns whether an external GPU is connected.
     /// </summary>
@@ -246,7 +227,6 @@ public sealed class PerformanceGpuController
     /// This is currently a stub because the original implementation did not provide detection logic.
     /// </remarks>
     private static bool IsExternalGpuConnected() => false;
-
     /// <summary>
     /// Applies the Eco mode transition sequence.
     /// </summary>
@@ -259,7 +239,6 @@ public sealed class PerformanceGpuController
 
         _ = SetGpuEcoFlag(enableEcoMode ? 1 : 0);
         await Task.Delay(500, cancellationToken).ConfigureAwait(false);
-
         if (!enableEcoMode)
         {
             await Task.Delay(5000, cancellationToken).ConfigureAwait(false);

@@ -3,7 +3,6 @@ using System.ServiceProcess;
 using Microsoft.Extensions.Options;
 
 namespace AsusHardwareService;
-
 /// <summary>
 /// Applies the configured ASUS battery charge limit through the ASUS ACPI interface.
 /// </summary>
@@ -15,11 +14,9 @@ namespace AsusHardwareService;
 public sealed class BatteryChargeLimiter
 {
     private static readonly TimeSpan ServiceStateTimeout = TimeSpan.FromSeconds(30);
-
     private readonly ILogger<BatteryChargeLimiter> _logger;
     private readonly IServiceProvider _services;
     private readonly IOptionsMonitor<HardwareOptions> _options;
-
     /// <summary>
     /// Initialises a new instance of the <see cref="BatteryChargeLimiter"/> class.
     /// </summary>
@@ -35,7 +32,6 @@ public sealed class BatteryChargeLimiter
         _services = services ?? throw new ArgumentNullException(nameof(services));
         _options = options ?? throw new ArgumentNullException(nameof(options));
     }
-
     /// <summary>
     /// Applies the configured battery charge limit.
     /// </summary>
@@ -54,7 +50,6 @@ public sealed class BatteryChargeLimiter
                 _logger.LogError("No valid charge limit configured. Value: {Limit}", limit);
                 return;
             }
-
             EnsureServiceRunning(AsusDriverLocator.DriverServiceName);
 
             using var acpi = _services.GetRequiredService<AsusAcpi>();
@@ -65,7 +60,6 @@ public sealed class BatteryChargeLimiter
             }
 
             _logger.LogInformation("Setting battery charge limit to {Limit}.", limit);
-
             var result = acpi.SetDeviceValue(AsusAcpi.BatteryLimit, limit, "Limit");
             if (result != 1)
             {
@@ -80,7 +74,6 @@ public sealed class BatteryChargeLimiter
             _logger.LogError(ex, "Fatal error while setting battery charge limit.");
         }
     }
-
     /// <summary>
     /// Ensures that the specified Windows service is running.
     /// </summary>
@@ -92,7 +85,6 @@ public sealed class BatteryChargeLimiter
     {
         using var controller = new ServiceController(serviceName);
         var status = RefreshStatus(controller);
-
         if (status == ServiceControllerStatus.Running)
         {
             _logger.LogInformation("Required service {ServiceName} is already running.", serviceName);
@@ -105,35 +97,30 @@ public sealed class BatteryChargeLimiter
             WaitForStatus(controller, serviceName, ServiceControllerStatus.Running);
             return;
         }
-
         if (status == ServiceControllerStatus.StopPending)
         {
             _logger.LogInformation("Waiting for service {ServiceName} to stop before starting it.", serviceName);
             WaitForStatus(controller, serviceName, ServiceControllerStatus.Stopped);
             status = RefreshStatus(controller);
         }
-
         if (status == ServiceControllerStatus.PausePending)
         {
             _logger.LogInformation("Waiting for service {ServiceName} to finish pausing.", serviceName);
             WaitForStatus(controller, serviceName, ServiceControllerStatus.Paused);
             status = RefreshStatus(controller);
         }
-
         if (status == ServiceControllerStatus.ContinuePending)
         {
             _logger.LogInformation("Waiting for service {ServiceName} to resume.", serviceName);
             WaitForStatus(controller, serviceName, ServiceControllerStatus.Running);
             return;
         }
-
         switch (status)
         {
             case ServiceControllerStatus.Stopped:
                 _logger.LogInformation("Starting required service {ServiceName}.", serviceName);
                 TryControlService(serviceName, controller.Start);
                 break;
-
             case ServiceControllerStatus.Paused:
                 if (!controller.CanPauseAndContinue)
                 {
@@ -143,7 +130,6 @@ public sealed class BatteryChargeLimiter
                 _logger.LogInformation("Continuing required service {ServiceName}.", serviceName);
                 TryControlService(serviceName, controller.Continue);
                 break;
-
             case ServiceControllerStatus.Running:
                 return;
 
@@ -153,7 +139,6 @@ public sealed class BatteryChargeLimiter
 
         WaitForStatus(controller, serviceName, ServiceControllerStatus.Running);
     }
-
     /// <summary>
     /// Refreshes the Windows service status and returns the latest value.
     /// </summary>
@@ -164,7 +149,6 @@ public sealed class BatteryChargeLimiter
         controller.Refresh();
         return controller.Status;
     }
-
     /// <summary>
     /// Waits for a Windows service to reach the expected status.
     /// </summary>
@@ -178,13 +162,11 @@ public sealed class BatteryChargeLimiter
         ServiceControllerStatus expectedStatus)
     {
         controller.WaitForStatus(expectedStatus, ServiceStateTimeout);
-
         if (RefreshStatus(controller) != expectedStatus)
         {
             throw new InvalidOperationException($"Service {serviceName} did not reach {expectedStatus} state.");
         }
     }
-
     /// <summary>
     /// Executes a service control operation and logs failures with consistent diagnostics.
     /// </summary>

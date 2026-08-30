@@ -2,7 +2,6 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 
 namespace AsusHardwareService;
-
 /// <summary>
 /// Starts a process inside an interactive user session from the Windows service session.
 /// </summary>
@@ -16,7 +15,6 @@ public static class SessionProcessLauncher
     private const int CreateNewConsole = 0x00000010;
     private const int StartfUseShowWindow = 0x00000001;
     private const short SwHide = 0;
-
     private const uint TokenAssignPrimary = 0x0001;
     private const uint TokenDuplicate = 0x0002;
     private const uint TokenQuery = 0x0008;
@@ -28,7 +26,6 @@ public static class SessionProcessLauncher
 
     [DllImport("Wtsapi32.dll", SetLastError = true)]
     private static extern bool WTSQueryUserToken(int sessionId, out IntPtr token);
-
     [DllImport("advapi32.dll", SetLastError = true)]
     private static extern bool DuplicateTokenEx(
         IntPtr hExistingToken,
@@ -43,10 +40,8 @@ public static class SessionProcessLauncher
         out IntPtr lpEnvironment,
         IntPtr hToken,
         bool bInherit);
-
     [DllImport("userenv.dll", SetLastError = true)]
     private static extern bool DestroyEnvironmentBlock(IntPtr lpEnvironment);
-
     [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern bool CreateProcessAsUser(
         IntPtr hToken,
@@ -60,10 +55,8 @@ public static class SessionProcessLauncher
         string? lpCurrentDirectory,
         ref StartupInfo lpStartupInfo,
         out ProcessInformation lpProcessInformation);
-
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool CloseHandle(IntPtr hObject);
-
     /// <summary>
     /// Tries to start a process in the specified interactive user session.
     /// </summary>
@@ -83,7 +76,6 @@ public static class SessionProcessLauncher
         IntPtr userToken = IntPtr.Zero;
         IntPtr primaryToken = IntPtr.Zero;
         IntPtr environmentBlock = IntPtr.Zero;
-
         try
         {
             if (!WTSQueryUserToken(sessionId, out userToken))
@@ -97,7 +89,6 @@ public static class SessionProcessLauncher
                 TokenQuery |
                 TokenAdjustDefault |
                 TokenAdjustSessionId;
-
             if (!DuplicateTokenEx(
                     userToken,
                     tokenAccess,
@@ -108,7 +99,6 @@ public static class SessionProcessLauncher
             {
                 throw CreateWin32Exception("DuplicateTokenEx failed.");
             }
-
             if (!CreateEnvironmentBlock(out environmentBlock, primaryToken, false))
             {
                 throw CreateWin32Exception("CreateEnvironmentBlock failed.");
@@ -121,10 +111,8 @@ public static class SessionProcessLauncher
                 dwFlags = StartfUseShowWindow,
                 wShowWindow = SwHide,
             };
-
             var commandLine = BuildCommandLine(executablePath, arguments);
             var workingDirectory = Path.GetDirectoryName(executablePath);
-
             var created = CreateProcessAsUser(
                 primaryToken,
                 null,
@@ -137,7 +125,6 @@ public static class SessionProcessLauncher
                 workingDirectory,
                 ref startupInfo,
                 out var processInfo);
-
             if (!created)
             {
                 throw CreateWin32Exception("CreateProcessAsUser failed.");
@@ -150,7 +137,6 @@ public static class SessionProcessLauncher
                     sessionId,
                     processInfo.dwProcessId,
                     commandLine);
-
                 return true;
             }
             finally
@@ -171,7 +157,6 @@ public static class SessionProcessLauncher
             CloseHandleIfNeeded(userToken, CloseHandle);
         }
     }
-
     /// <summary>
     /// Builds a safe command line for <c>CreateProcessAsUser</c>.
     /// </summary>
@@ -183,14 +168,12 @@ public static class SessionProcessLauncher
         var quotedPath = $"\"{executablePath}\"";
         return string.IsNullOrWhiteSpace(arguments) ? quotedPath : $"{quotedPath} {arguments}";
     }
-
     /// <summary>
     /// Creates a <see cref="Win32Exception"/> from the current last-error value.
     /// </summary>
     /// <param name="message">The contextual error message.</param>
     /// <returns>The constructed exception.</returns>
     private static Win32Exception CreateWin32Exception(string message) => new(Marshal.GetLastWin32Error(), message);
-
     /// <summary>
     /// Executes a native cleanup callback when a handle-like pointer is valid.
     /// </summary>
@@ -203,7 +186,6 @@ public static class SessionProcessLauncher
             closeAction(handle);
         }
     }
-
     /// <summary>
     /// Defines the native STARTUPINFO structure used when creating a process.
     /// </summary>
@@ -229,7 +211,6 @@ public static class SessionProcessLauncher
         public IntPtr hStdOutput;
         public IntPtr hStdError;
     }
-
     /// <summary>
     /// Defines the native PROCESS_INFORMATION structure returned for a newly created process.
     /// </summary>

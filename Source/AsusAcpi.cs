@@ -3,7 +3,6 @@ using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
 namespace AsusHardwareService;
-
 /// <summary>
 /// Provides low level access to the ASUS ACPI device exposed as <c>\\.\ATKACPI</c>.
 /// </summary>
@@ -26,11 +25,15 @@ public sealed class AsusAcpi : IDisposable
     private const int OutputBufferSize = 16;
     private const int RequestHeaderSize = 8;
     private const int ReadResultOffset = 65536;
-
     /// <summary>
     /// ASUS ACPI device identifier for the battery charge limit setting.
     /// </summary>
     public const uint BatteryLimit = 0x00120057;
+
+    /// <summary>
+    /// ASUS ACPI device identifier for keyboard backlight brightness.
+    /// </summary>
+    public const uint KeyboardBacklight = 0x00050021;
 
     /// <summary>
     /// ASUS ACPI device identifier for laptop panel overdrive.
@@ -41,7 +44,6 @@ public sealed class AsusAcpi : IDisposable
     /// ASUS ACPI MiniLED endpoint used by two-state MiniLED panels.
     /// </summary>
     public const uint ScreenMiniled1 = 0x0005001E;
-
     /// <summary>
     /// ASUS ACPI MiniLED endpoint used by three-state MiniLED panels.
     /// </summary>
@@ -56,7 +58,6 @@ public sealed class AsusAcpi : IDisposable
     /// ASUS ACPI device identifier for the ROG GPU Eco mode setting.
     /// </summary>
     public const uint GpuEcoRog = 0x00090020;
-
     /// <summary>
     /// ASUS ACPI device identifier for the ROG GPU MUX mode setting.
     /// </summary>
@@ -70,7 +71,6 @@ public sealed class AsusAcpi : IDisposable
     /// Gets a value indicating whether the ASUS ACPI device was opened successfully.
     /// </summary>
     public bool IsConnected { get; }
-
     /// <summary>
     /// Initialises a new instance of the <see cref="AsusAcpi"/> class.
     /// </summary>
@@ -86,14 +86,12 @@ public sealed class AsusAcpi : IDisposable
             OpenExisting,
             FileAttributeNormal,
             IntPtr.Zero);
-
         IsConnected = !_deviceHandle.IsInvalid;
         if (!IsConnected)
         {
             _logger.LogError("Cannot open {DevicePath}. Win32 error {Error}.", DevicePath, Marshal.GetLastWin32Error());
         }
     }
-
     /// <summary>
     /// Writes an ASUS ACPI value.
     /// </summary>
@@ -104,14 +102,12 @@ public sealed class AsusAcpi : IDisposable
     public int SetDeviceValue(uint deviceId, int value, string? logName = null)
     {
         ThrowIfDisposed();
-
         Span<byte> arguments = stackalloc byte[8];
         BinaryPrimitives.WriteUInt32LittleEndian(arguments, deviceId);
         BinaryPrimitives.WriteUInt32LittleEndian(arguments[4..], unchecked((uint)value));
 
         var reply = InvokeMethod(WriteMethodId, arguments);
         var result = BinaryPrimitives.ReadInt32LittleEndian(reply);
-
         if (!string.IsNullOrWhiteSpace(logName))
         {
             _logger.LogInformation("{Name} set to {Value}. Result={Result}", logName, value, result == 1 ? "OK" : result);
@@ -119,7 +115,6 @@ public sealed class AsusAcpi : IDisposable
 
         return result;
     }
-
     /// <summary>
     /// Reads a raw ASUS ACPI value without applying the standard ASUS read-result offset.
     /// </summary>
@@ -129,7 +124,6 @@ public sealed class AsusAcpi : IDisposable
     public int GetRawDeviceValue(uint deviceId, string? logName = null)
     {
         ThrowIfDisposed();
-
         Span<byte> arguments = stackalloc byte[4];
         BinaryPrimitives.WriteUInt32LittleEndian(arguments, deviceId);
 
@@ -143,7 +137,6 @@ public sealed class AsusAcpi : IDisposable
 
         return result;
     }
-
     /// <summary>
     /// Reads an ASUS ACPI value.
     /// </summary>
@@ -153,7 +146,6 @@ public sealed class AsusAcpi : IDisposable
     public int GetDeviceValue(uint deviceId, string? logName = null)
     {
         ThrowIfDisposed();
-
         Span<byte> arguments = stackalloc byte[8];
         BinaryPrimitives.WriteUInt32LittleEndian(arguments, deviceId);
 
@@ -167,7 +159,6 @@ public sealed class AsusAcpi : IDisposable
 
         return result;
     }
-
     /// <summary>
     /// Releases the unmanaged ASUS device handle.
     /// </summary>
@@ -181,7 +172,6 @@ public sealed class AsusAcpi : IDisposable
         _deviceHandle.Dispose();
         _disposed = true;
     }
-
     /// <summary>
     /// Calls an ASUS ACPI method through <c>DeviceIoControl</c>.
     /// </summary>
@@ -193,14 +183,12 @@ public sealed class AsusAcpi : IDisposable
     private byte[] InvokeMethod(uint methodId, ReadOnlySpan<byte> arguments)
     {
         ThrowIfDisposed();
-
         var requestBuffer = new byte[RequestHeaderSize + arguments.Length];
         var responseBuffer = new byte[OutputBufferSize];
 
         BinaryPrimitives.WriteUInt32LittleEndian(requestBuffer, methodId);
         BinaryPrimitives.WriteUInt32LittleEndian(requestBuffer.AsSpan(4), (uint)arguments.Length);
         arguments.CopyTo(requestBuffer.AsSpan(RequestHeaderSize));
-
         uint bytesReturned = 0;
         var succeeded = DeviceIoControl(
             _deviceHandle,
@@ -216,7 +204,6 @@ public sealed class AsusAcpi : IDisposable
         {
             throw new InvalidOperationException($"DeviceIoControl failed with Win32 error {Marshal.GetLastWin32Error()}.");
         }
-
         if (bytesReturned < sizeof(int))
         {
             throw new InvalidOperationException($"DeviceIoControl returned an incomplete response. BytesReturned={bytesReturned}.");
@@ -229,7 +216,6 @@ public sealed class AsusAcpi : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
     }
-
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern SafeFileHandle CreateFile(
         string lpFileName,
@@ -239,7 +225,6 @@ public sealed class AsusAcpi : IDisposable
         uint dwCreationDisposition,
         uint dwFlagsAndAttributes,
         IntPtr hTemplateFile);
-
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool DeviceIoControl(
         SafeFileHandle hDevice,

@@ -1,7 +1,6 @@
 using System.Runtime.InteropServices;
 
 namespace AsusHardwareService;
-
 /// <summary>
 /// Provides native Windows display enumeration and refresh-rate switching helpers.
 /// </summary>
@@ -18,7 +17,6 @@ internal static class ScreenNative
     private const int DisplayDeviceActive = 0x00000001;
     private const int DisplayDeviceAttachedToDesktop = 0x00000001;
     private const int DisplayDeviceMirroringDriver = 0x00000008;
-
     /// <summary>
     /// Finds the most likely laptop display device.
     /// </summary>
@@ -32,7 +30,6 @@ internal static class ScreenNative
         {
             return null;
         }
-
         if (preferredRefreshRate is > 0)
         {
             var exact = candidates
@@ -46,7 +43,6 @@ internal static class ScreenNative
                 return exact.DeviceName;
             }
         }
-
         var highRefreshInternal = candidates
             .Where(candidate => candidate.MaxRefreshRate >= 120)
             .OrderByDescending(candidate => candidate.IsInternalLike)
@@ -57,7 +53,6 @@ internal static class ScreenNative
         {
             return highRefreshInternal.DeviceName;
         }
-
         var internalLike = candidates
             .OrderByDescending(candidate => candidate.IsInternalLike)
             .ThenBy(candidate => candidate.DeviceIndex)
@@ -65,7 +60,6 @@ internal static class ScreenNative
 
         return internalLike?.DeviceName;
     }
-
     /// <summary>
     /// Returns diagnostic descriptions for all detected display candidates.
     /// </summary>
@@ -76,7 +70,6 @@ internal static class ScreenNative
             .Select(candidate => candidate.ToLogLine())
             .ToArray();
     }
-
     /// <summary>
     /// Reads the current refresh rate for a Windows display device.
     /// </summary>
@@ -88,13 +81,11 @@ internal static class ScreenNative
         {
             return -1;
         }
-
         var mode = DevMode.Create();
         return EnumDisplaySettings(deviceName, EnumCurrentSettings, ref mode)
             ? (int)mode.dmDisplayFrequency
             : -1;
     }
-
     /// <summary>
     /// Gets the maximum advertised refresh rate for a Windows display device.
     /// </summary>
@@ -109,7 +100,6 @@ internal static class ScreenNative
 
         var max = -1;
         var mode = DevMode.Create();
-
         for (var index = 0; EnumDisplaySettings(deviceName, index, ref mode); index++)
         {
             max = Math.Max(max, (int)mode.dmDisplayFrequency);
@@ -118,7 +108,6 @@ internal static class ScreenNative
 
         return max;
     }
-
     /// <summary>
     /// Sets the refresh rate for a Windows display device.
     /// </summary>
@@ -131,7 +120,6 @@ internal static class ScreenNative
         {
             return false;
         }
-
         var mode = DevMode.Create();
         if (!EnumDisplaySettings(deviceName, EnumCurrentSettings, ref mode))
         {
@@ -146,7 +134,6 @@ internal static class ScreenNative
         {
             return false;
         }
-
         var result = ChangeDisplaySettingsEx(deviceName, ref mode, IntPtr.Zero, CdsUpdateRegistry, IntPtr.Zero);
         return result == DispChangeSuccessful;
     }
@@ -154,13 +141,11 @@ internal static class ScreenNative
     private static IEnumerable<DisplayCandidate> GetDisplayCandidates(bool requireActive)
     {
         var adapter = DisplayDevice.Create();
-
         for (uint adapterIndex = 0; EnumDisplayDevices(null, adapterIndex, ref adapter, 0); adapterIndex++)
         {
             var active = (adapter.StateFlags & DisplayDeviceActive) != 0;
             var attached = (adapter.StateFlags & DisplayDeviceAttachedToDesktop) != 0;
             var mirror = (adapter.StateFlags & DisplayDeviceMirroringDriver) != 0;
-
             if ((!active && requireActive) || !attached || mirror)
             {
                 adapter = DisplayDevice.Create();
@@ -173,7 +158,6 @@ internal static class ScreenNative
             var monitor = DisplayDevice.Create();
             var monitorName = string.Empty;
             var monitorId = string.Empty;
-
             for (uint monitorIndex = 0; EnumDisplayDevices(deviceName, monitorIndex, ref monitor, 0); monitorIndex++)
             {
                 if ((monitor.StateFlags & DisplayDeviceActive) != 0 || !requireActive)
@@ -185,13 +169,11 @@ internal static class ScreenNative
 
                 monitor = DisplayDevice.Create();
             }
-
             var isInternalLike =
                 monitorId.Contains(@"DISPLAY\", StringComparison.OrdinalIgnoreCase) &&
                 !monitorName.Contains("Virtual", StringComparison.OrdinalIgnoreCase) &&
                 !monitorName.Contains("Remote", StringComparison.OrdinalIgnoreCase) &&
                 !monitorName.Contains("Mirage", StringComparison.OrdinalIgnoreCase);
-
             yield return new DisplayCandidate(
                 adapterIndex,
                 deviceName,
@@ -207,7 +189,6 @@ internal static class ScreenNative
             adapter = DisplayDevice.Create();
         }
     }
-
     private static HashSet<int> GetRefreshRates(string deviceName)
     {
         var rates = new HashSet<int>();
@@ -225,7 +206,6 @@ internal static class ScreenNative
 
         return rates;
     }
-
     private sealed record DisplayCandidate(
         uint DeviceIndex,
         string DeviceName,
@@ -243,7 +223,6 @@ internal static class ScreenNative
             var rates = RefreshRates.Count == 0
                 ? "none"
                 : string.Join(',', RefreshRates.OrderBy(rate => rate));
-
             return $"{DeviceName} adapter='{AdapterName}' monitor='{MonitorName}' id='{MonitorId}' active={Active} attached={Attached} internalLike={IsInternalLike} maxHz={MaxRefreshRate} rates=[{rates}]";
         }
     }
@@ -254,7 +233,6 @@ internal static class ScreenNative
         uint iDevNum,
         ref DisplayDevice lpDisplayDevice,
         uint dwFlags);
-
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern bool EnumDisplaySettings(
         string? lpszDeviceName,
@@ -268,7 +246,6 @@ internal static class ScreenNative
         IntPtr hwnd,
         int dwflags,
         IntPtr lParam);
-
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct DisplayDevice
     {
@@ -284,7 +261,6 @@ internal static class ScreenNative
 
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
         public string DeviceID;
-
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
         public string DeviceKey;
 
@@ -300,7 +276,6 @@ internal static class ScreenNative
             };
         }
     }
-
     [Flags]
     private enum DisplayModeField : uint
     {
@@ -315,7 +290,6 @@ internal static class ScreenNative
 
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = DeviceNameSize)]
         public string dmDeviceName;
-
         public ushort dmSpecVersion;
         public ushort dmDriverVersion;
         public ushort dmSize;
@@ -330,10 +304,8 @@ internal static class ScreenNative
         public short dmYResolution;
         public short dmTTOption;
         public short dmCollate;
-
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = FormNameSize)]
         public string dmFormName;
-
         public ushort dmLogPixels;
         public uint dmBitsPerPel;
         public uint dmPelsWidth;
@@ -348,7 +320,6 @@ internal static class ScreenNative
         public uint dmReserved2;
         public uint dmPanningWidth;
         public uint dmPanningHeight;
-
         public static DevMode Create()
         {
             return new DevMode

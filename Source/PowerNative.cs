@@ -1,7 +1,6 @@
 using System.Runtime.InteropServices;
 
 namespace AsusHardwareService;
-
 /// <summary>
 /// Provides access to native Windows power status information.
 /// </summary>
@@ -15,7 +14,6 @@ internal static class PowerNative
     {
         return GetSystemPowerStatus(out var status) && status.ACLineStatus == 1;
     }
-
     [DllImport("kernel32.dll")]
     private static extern bool GetSystemPowerStatus(out SystemPowerStatus status);
 
