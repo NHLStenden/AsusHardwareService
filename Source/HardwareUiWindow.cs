@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace AsusHardwareService;
@@ -34,20 +35,20 @@ internal static class HardwareUiWindow
     private const uint WmKeyboardBacklightChanged = WmApp + 0x32;
     private const uint WmDisplayBrightnessChanged = WmApp + 0x33;
     private const uint WmPerformanceGpuChanged = WmApp + 0x34;
+    private const uint WmAnimationFrame = WmApp + 0x35;
 
     private const int MaNoActivate = 3;
     private const int SwHide = 0;
     private const int SwShowNoActivate = 4;
+    private const uint SwpNoSize = 0x0001;
+    private const uint SwpNoZOrder = 0x0004;
     private const uint SwpNoActivate = 0x0010;
     private const uint SwpShowWindow = 0x0040;
 
     private const uint WsPopup = 0x80000000;
     private const uint WsExTopmost = 0x00000008;
     private const uint WsExToolWindow = 0x00000080;
-    private const uint WsExLayered = 0x00080000;
     private const uint WsExNoActivate = 0x08000000;
-    private const int GwlExStyle = -20;
-    private const uint LwaAlpha = 0x00000002;
 
     private const uint MonitorDefaultToPrimary = 0x00000001;
     private const uint MonitorDefaultToNearest = 0x00000002;
@@ -58,6 +59,13 @@ internal static class HardwareUiWindow
     private const int DwmwcpRound = 2;
     private const int DwmsbtNone = 1;
     private const int DwmsbtTransientWindow = 3;
+
+    private const int WcaAccentPolicy = 19;
+    private const int AccentDisabled = 0;
+    private const int AccentEnableAcrylicBlurBehind = 4;
+    // Accent-policy colours are AABBGGRR. This keeps the Shell's #2C2C2C dark Acrylic tint
+    // while retaining enough backdrop contribution to avoid the old opaque/fallback look.
+    private const uint DarkAcrylicGradientColor = 0xCC2C2C2C;
 
     private const uint SpiGetHighContrast = 0x0042;
     private const uint SpiGetClientAreaAnimation = 0x1042;
@@ -86,14 +94,12 @@ internal static class HardwareUiWindow
     private const int NullBrush = 5;
     private const int NullPen = 8;
 
-    // Windows flyout dismissal combines a short opacity fade with a small translation. Keep
-    // both on the same 83 ms timeline so the surface falls away instead of moving and fading
-    // as two separate animations.
-    private const uint FadeAnimationMilliseconds = 83;
-    private const uint AwBlend = 0x00080000;
-    private const uint HideAnimationMilliseconds = 83;
-    private const uint HideAnimationFrameMilliseconds = 10;
-    private const int HideAnimationDistanceDip = 8;
+    // Match the native hardware indicator's motion with translation only: a fast entrance and
+    // a more relaxed return toward the screen edge. 83 ms is an opacity-oriented WinUI token;
+    // using it for the complete translation undersamples the movement on high-refresh displays.
+    private const uint ShowAnimationMilliseconds = 167;
+    private const uint HideAnimationMilliseconds = 250;
+    private const int FlyoutAnimationDistanceDip = 20;
     private const uint HideDelayMilliseconds = 1500;
     // Graceful service/session changes send WM_CLOSE immediately. This low-frequency Win32
     // watchdog is only a fallback for abrupt service termination or a missed session transition.
@@ -110,7 +116,6 @@ internal static class HardwareUiWindow
     private static readonly IntPtr HwndTopmost = new(-1);
     private static readonly IntPtr DpiAwarenessContextPerMonitorAwareV2 = new(-4);
     private static readonly UIntPtr HideTimerId = (UIntPtr)1u;
-    private static readonly UIntPtr HideAnimationTimerId = (UIntPtr)2u;
     private static readonly UIntPtr ServiceWatchTimerId = (UIntPtr)3u;
     private static readonly WindowProcedureDelegate WindowProcedureCallback = WindowProcedure;
 
@@ -125,8 +130,16 @@ internal static class HardwareUiWindow
     private static int _windowWidth;
     private static int _windowHeight;
     private static uint _windowDpi = 96;
-    private static ulong _hideAnimationStarted;
+    private static bool _showAnimationActive;
     private static bool _hideAnimationActive;
+    private static bool _systemBackdropEnabled;
+    private static long _animationStartTimestamp;
+    private static int _animationStartY;
+    private static int _animationEndY;
+    private static int _animationLastY;
+    private static uint _animationDurationMilliseconds;
+    private static bool _animationIncoming;
+    private static uint _animationGeneration;
 
     /// <summary>
     /// Runs UI mode, forwarding to an existing instance or becoming the resident UI instance.
@@ -314,13 +327,11 @@ internal static class HardwareUiWindow
                     return IntPtr.Zero;
                 }
 
-                if (wParam == HideAnimationTimerId)
-                {
-                    UpdateHideAnimation(window);
-                    return IntPtr.Zero;
-                }
-
                 break;
+
+            case WmAnimationFrame:
+                AdvanceWindowAnimation(window, unchecked((uint)wParam.ToUInt64()));
+                return IntPtr.Zero;
 
             case WmSettingChange:
             case WmSysColorChange:
@@ -331,6 +342,7 @@ internal static class HardwareUiWindow
 
             case WmDwmCompositionChanged:
                 ConfigureWindows11Appearance(window);
+                InvalidateRect(window, IntPtr.Zero, false);
                 return IntPtr.Zero;
 
             case WmEraseBackground:
@@ -350,6 +362,7 @@ internal static class HardwareUiWindow
 
             case WmClose:
                 KillTimer(window, HideTimerId);
+                CancelShowAnimation(window);
                 CancelHideAnimation(window);
                 KillTimer(window, ServiceWatchTimerId);
                 DestroyWindow(window);
@@ -394,7 +407,7 @@ internal static class HardwareUiWindow
 
         _windowDpi = dpi;
         _windowWidth = Scale(GetLogicalWindowWidth(_notification.Kind), dpi);
-        _windowHeight = Scale(52, dpi);
+        _windowHeight = Scale(48, dpi);
         var edgeMargin = Scale(16, dpi);
         var workAreaWidth = monitorInfo.rcWork.Right - monitorInfo.rcWork.Left;
         _finalX = _indicatorPosition == IndicatorPosition.TopLeft
@@ -406,6 +419,7 @@ internal static class HardwareUiWindow
 
         InvalidateRect(window, IntPtr.Zero, false);
         KillTimer(window, HideTimerId);
+        CancelShowAnimation(window);
         CancelHideAnimation(window);
 
         var alreadyVisible = IsWindowVisible(window);
@@ -414,13 +428,40 @@ internal static class HardwareUiWindow
 
         if (!alreadyVisible)
         {
-            if (!_animationsEnabled || !AnimateWindow(window, FadeAnimationMilliseconds, AwBlend))
+            if (_animationsEnabled)
+            {
+                StartShowAnimation(window);
+            }
+            else
             {
                 ShowWindow(window, SwShowNoActivate);
             }
         }
 
         ArmHideTimer(window);
+    }
+
+    private static void StartShowAnimation(IntPtr window)
+    {
+        var distance = Scale(FlyoutAnimationDistanceDip, _windowDpi);
+        var direction = _indicatorPosition == IndicatorPosition.BottomCenter ? 1 : -1;
+        BeginWindowAnimation(
+            window,
+            _finalY + (direction * distance),
+            _finalY,
+            ShowAnimationMilliseconds,
+            incoming: true);
+    }
+
+    private static void CancelShowAnimation(IntPtr window)
+    {
+        if (!_showAnimationActive)
+        {
+            return;
+        }
+
+        _showAnimationActive = false;
+        SetStatusWindowPosition(window, _finalY, show: true);
     }
 
     private static void HideStatusWindow(IntPtr window)
@@ -430,47 +471,21 @@ internal static class HardwareUiWindow
             return;
         }
 
+        CancelShowAnimation(window);
         if (!_animationsEnabled)
         {
             ShowWindow(window, SwHide);
             return;
         }
 
-        EnableLayeredAlpha(window);
-        _hideAnimationStarted = GetTickCount64();
-        _hideAnimationActive = true;
-        SetTimer(window, HideAnimationTimerId, HideAnimationFrameMilliseconds, IntPtr.Zero);
-    }
-
-    private static void UpdateHideAnimation(IntPtr window)
-    {
-        if (!_hideAnimationActive)
-        {
-            KillTimer(window, HideAnimationTimerId);
-            return;
-        }
-
-        var elapsed = GetTickCount64() - _hideAnimationStarted;
-        var progress = Math.Min(1.0, elapsed / (double)HideAnimationMilliseconds);
-
-        // Exit translation accelerates toward the edge while opacity fades linearly. Keeping
-        // these independent avoids the late, abrupt fade caused by applying one easing to both.
-        var positionProgress = progress * progress;
-        var distance = Scale(HideAnimationDistanceDip, _windowDpi);
+        var distance = Scale(FlyoutAnimationDistanceDip, _windowDpi);
         var direction = _indicatorPosition == IndicatorPosition.BottomCenter ? 1 : -1;
-        var y = _finalY + (direction * (int)Math.Round(distance * positionProgress));
-        var alpha = (byte)Math.Round(255.0 * (1.0 - progress));
-
-        SetStatusWindowPosition(window, y, show: true);
-        SetLayeredWindowAttributes(window, 0, alpha, LwaAlpha);
-
-        if (progress >= 1.0)
-        {
-            KillTimer(window, HideAnimationTimerId);
-            ShowWindow(window, SwHide);
-            RestoreAfterHideAnimation(window);
-            SetStatusWindowPosition(window, _finalY, show: false);
-        }
+        BeginWindowAnimation(
+            window,
+            _finalY,
+            _finalY + (direction * distance),
+            HideAnimationMilliseconds,
+            incoming: false);
     }
 
     private static void CancelHideAnimation(IntPtr window)
@@ -480,32 +495,160 @@ internal static class HardwareUiWindow
             return;
         }
 
-        KillTimer(window, HideAnimationTimerId);
-        RestoreAfterHideAnimation(window);
-        SetStatusWindowPosition(window, _finalY, show: IsWindowVisible(window));
-    }
-
-    private static void EnableLayeredAlpha(IntPtr window)
-    {
-        var extendedStyle = GetWindowLongPtr(window, GwlExStyle).ToInt64();
-        if ((extendedStyle & WsExLayered) == 0)
-        {
-            SetWindowLongPtr(window, GwlExStyle, new IntPtr(extendedStyle | WsExLayered));
-        }
-
-        SetLayeredWindowAttributes(window, 0, 255, LwaAlpha);
-    }
-
-    private static void RestoreAfterHideAnimation(IntPtr window)
-    {
         _hideAnimationActive = false;
-        SetLayeredWindowAttributes(window, 0, 255, LwaAlpha);
+        SetStatusWindowPosition(window, _finalY, show: true);
+    }
 
-        var extendedStyle = GetWindowLongPtr(window, GwlExStyle).ToInt64();
-        if ((extendedStyle & WsExLayered) != 0)
+    private static void BeginWindowAnimation(
+        IntPtr window,
+        int startY,
+        int endY,
+        uint durationMilliseconds,
+        bool incoming)
+    {
+        _animationGeneration = unchecked(_animationGeneration + 1u);
+        if (_animationGeneration == 0u)
         {
-            SetWindowLongPtr(window, GwlExStyle, new IntPtr(extendedStyle & ~WsExLayered));
+            _animationGeneration = 1u;
         }
+
+        _animationStartY = startY;
+        _animationEndY = endY;
+        _animationLastY = startY;
+        _animationDurationMilliseconds = durationMilliseconds;
+        _animationIncoming = incoming;
+        _showAnimationActive = incoming;
+        _hideAnimationActive = !incoming;
+
+        // Keep the normal DWM-backed HWND intact. Present the exact first position before the
+        // high-resolution clock starts so the first animation sample is not skipped.
+        SetStatusWindowPosition(window, startY, show: true);
+        UpdateWindow(window);
+        if (DwmFlush() < 0)
+        {
+            FinishWindowAnimation(window);
+            return;
+        }
+
+        _animationStartTimestamp = Stopwatch.GetTimestamp();
+        PostAnimationFrame(window, _animationGeneration);
+    }
+
+    private static void AdvanceWindowAnimation(IntPtr window, uint generation)
+    {
+        if (generation != _animationGeneration ||
+            (!_showAnimationActive && !_hideAnimationActive))
+        {
+            return;
+        }
+
+        var elapsedTicks = Stopwatch.GetTimestamp() - _animationStartTimestamp;
+        var durationTicks = Stopwatch.Frequency * (_animationDurationMilliseconds / 1000.0);
+        var progress = durationTicks <= 0.0
+            ? 1.0
+            : Math.Clamp(elapsedTicks / durationTicks, 0.0, 1.0);
+        var easedProgress = _animationIncoming
+            ? EaseIncoming(progress)
+            : EaseOutgoing(progress);
+        var y = (int)Math.Round(
+            _animationStartY + ((_animationEndY - _animationStartY) * easedProgress));
+
+        if (y != _animationLastY)
+        {
+            MoveStatusWindow(window, y);
+            _animationLastY = y;
+        }
+
+        if (progress >= 1.0)
+        {
+            FinishWindowAnimation(window);
+            return;
+        }
+
+        // DwmFlush is the frame clock here: it waits for the next DWM present instead of asking a
+        // low-priority WM_TIMER to approximate the display cadence. If DWM cannot pace the window,
+        // finish without animation rather than spinning the UI thread or reintroducing timer jitter.
+        if (DwmFlush() < 0)
+        {
+            FinishWindowAnimation(window);
+            return;
+        }
+
+        PostAnimationFrame(window, generation);
+    }
+
+    private static void PostAnimationFrame(IntPtr window, uint generation)
+    {
+        PostMessage(window, WmAnimationFrame, new UIntPtr(generation), IntPtr.Zero);
+    }
+
+    private static void FinishWindowAnimation(IntPtr window)
+    {
+        MoveStatusWindow(window, _animationEndY);
+
+        if (_showAnimationActive)
+        {
+            _showAnimationActive = false;
+            SetStatusWindowPosition(window, _finalY, show: true);
+            return;
+        }
+
+        if (_hideAnimationActive)
+        {
+            // Make the last translated position a real presented frame before hiding the HWND.
+            // Otherwise the final step can be coalesced with SW_HIDE and the exit looks truncated.
+            DwmFlush();
+            _hideAnimationActive = false;
+            ShowWindow(window, SwHide);
+            SetStatusWindowPosition(window, _finalY, show: false);
+        }
+    }
+
+    private static void MoveStatusWindow(IntPtr window, int y)
+    {
+        SetWindowPos(
+            window,
+            IntPtr.Zero,
+            _finalX,
+            y,
+            0,
+            0,
+            SwpNoSize | SwpNoZOrder | SwpNoActivate);
+    }
+
+    private static double EaseIncoming(double progress)
+    {
+        if (progress <= 0.0)
+        {
+            return 0.0;
+        }
+
+        if (progress >= 1.0)
+        {
+            return 1.0;
+        }
+
+        // Exact y(t) for cubic-bezier(0,0,0,1), after solving x=t^3 for the Bezier parameter.
+        var parameter = Math.Cbrt(progress);
+        return (3.0 * parameter * parameter) - (2.0 * progress);
+    }
+
+    private static double EaseOutgoing(double progress)
+    {
+        if (progress <= 0.0)
+        {
+            return 0.0;
+        }
+
+        if (progress >= 1.0)
+        {
+            return 1.0;
+        }
+
+        // Exact y(t) for cubic-bezier(1,0,1,1), rather than the incorrect t^3 approximation.
+        var parameter = 1.0 - Math.Cbrt(1.0 - progress);
+        return (3.0 * parameter * parameter) -
+            (2.0 * parameter * parameter * parameter);
     }
 
     private static void ArmHideTimer(IntPtr window)
@@ -583,9 +726,20 @@ internal static class HardwareUiWindow
 
     private static void FillStatusBackground(IntPtr deviceContext, ref Rect clientRect)
     {
-        // WinUI flyouts use these Acrylic fallback fills when the material cannot be shown.
-        // Keeping the GDI surface on the same values avoids a different solid colour underneath
-        // the DWM-managed transient surface.
+        // A black GDI fill has zeroed pixel data on an extended DWM frame, exposing the Desktop
+        // Acrylic backdrop instead of covering it with the opaque fallback colour.
+        if (_systemBackdropEnabled)
+        {
+            var transparentBrush = CreateSolidBrush(Rgb(0, 0, 0));
+            if (transparentBrush != IntPtr.Zero)
+            {
+                FillRect(deviceContext, ref clientRect, transparentBrush);
+                DeleteObject(transparentBrush);
+            }
+            return;
+        }
+
+        // WinUI flyouts use these colours as the solid fallback when Acrylic cannot be shown.
         var backgroundColor = _highContrast
             ? GetSysColor(ColorWindow)
             : _isDarkTheme
@@ -629,7 +783,7 @@ internal static class HardwareUiWindow
             deviceContext,
             dpi,
             muted ? "Microphone muted" : "Microphone unmuted",
-            Scale(48, dpi),
+            Scale(42, dpi),
             0,
             _windowWidth - Scale(12, dpi),
             _windowHeight);
@@ -686,7 +840,7 @@ internal static class HardwareUiWindow
             deviceContext,
             dpi,
             $"{performanceMode} · {gpuMode}",
-            Scale(48, dpi),
+            Scale(42, dpi),
             0,
             _windowWidth - Scale(16, dpi),
             _windowHeight);
@@ -715,11 +869,11 @@ internal static class HardwareUiWindow
                 : Rgb(190, 190, 190);
         var accentColor = GetAccentColor();
 
-        // Match the Windows 11 hardware-indicator layout: compact icon, thin slider, numeric value.
-        var trackLeft = Scale(48, dpi);
-        var trackTop = Scale(24, dpi);
-        var trackRight = _windowWidth - Scale(44, dpi);
-        var trackBottom = Scale(28, dpi);
+        // Native HWConfirmatorUI uses a 48-DIP plate, a 32-DIP icon button with 5-DIP trailing margin, and a 40-DIP value slot.
+        var trackLeft = Scale(42, dpi);
+        var trackTop = Scale(22, dpi);
+        var trackRight = _windowWidth - Scale(40, dpi);
+        var trackBottom = Scale(26, dpi);
         DrawFilledRoundRect(
             deviceContext,
             trackLeft,
@@ -750,12 +904,12 @@ internal static class HardwareUiWindow
             deviceContext,
             dpi,
             value,
-            _windowWidth - Scale(36, dpi),
+            _windowWidth - Scale(40, dpi),
             0,
-            _windowWidth - Scale(10, dpi),
-            _windowHeight,
+            _windowWidth,
+            _windowHeight - Scale(2, dpi),
             400,
-            12,
+            14,
             DtCenter);
     }
 
@@ -763,11 +917,11 @@ internal static class HardwareUiWindow
     {
         return kind switch
         {
-            HardwareUiNotificationKind.KeyboardBacklight => 236,
-            HardwareUiNotificationKind.DisplayBrightness => 236,
+            HardwareUiNotificationKind.KeyboardBacklight => 200,
+            HardwareUiNotificationKind.DisplayBrightness => 200,
             HardwareUiNotificationKind.Microphone => 224,
             HardwareUiNotificationKind.PerformanceGpuMode => 236,
-            _ => 236,
+            _ => 200,
         };
     }
 
@@ -815,10 +969,10 @@ internal static class HardwareUiWindow
             SetTextColor(deviceContext, color);
             var iconRect = new Rect
             {
-                Left = Scale(14, dpi),
+                Left = Scale(5, dpi),
                 Top = 0,
-                Right = Scale(38, dpi),
-                Bottom = _windowHeight,
+                Right = Scale(37, dpi),
+                Bottom = _windowHeight - Scale(1, dpi),
             };
             DrawText(
                 deviceContext,
@@ -1123,11 +1277,88 @@ internal static class HardwareUiWindow
         var cornerPreference = DwmwcpRound;
         DwmSetWindowAttribute(window, DwmwaWindowCornerPreference, ref cornerPreference, sizeof(int));
 
-        // On Windows 11 22H2+ this opts the window into DWM's transient (Desktop Acrylic)
-        // category. The GDI client uses the matching WinUI fallback fill, so unsupported builds and
-        // composition fallback keep the same visual hierarchy without a second rendering stack.
-        var backdropType = _highContrast ? DwmsbtNone : DwmsbtTransientWindow;
-        DwmSetWindowAttribute(window, DwmwaSystemBackdropType, ref backdropType, sizeof(int));
+        // Clear the legacy accent policy first so theme changes cannot leave a stale dark tint.
+        SetAcrylicAccentPolicy(window, enabled: false);
+
+        var margins = _highContrast
+            ? new Margins()
+            : new Margins
+            {
+                cxLeftWidth = -1,
+                cxRightWidth = -1,
+                cyTopHeight = -1,
+                cyBottomHeight = -1,
+            };
+        var frameResult = DwmExtendFrameIntoClientArea(window, ref margins);
+
+        if (_highContrast)
+        {
+            var noBackdrop = DwmsbtNone;
+            DwmSetWindowAttribute(window, DwmwaSystemBackdropType, ref noBackdrop, sizeof(int));
+            _systemBackdropEnabled = false;
+            return;
+        }
+
+        if (_isDarkTheme)
+        {
+            // DWMSBT_TRANSIENTWINDOW has no tint parameter and on current Windows 11 builds can
+            // expose the bright Desktop Acrylic underpaint even with immersive dark mode enabled.
+            // The Shell's dark flyouts add a #2C2C2C Acrylic tint, so use the accent-policy path
+            // only for dark mode to reproduce that layer while keeping the same DWM blur.
+            var noBackdrop = DwmsbtNone;
+            DwmSetWindowAttribute(window, DwmwaSystemBackdropType, ref noBackdrop, sizeof(int));
+            if (frameResult >= 0 && SetAcrylicAccentPolicy(window, enabled: true))
+            {
+                _systemBackdropEnabled = true;
+                return;
+            }
+
+            // If the tint-capable path is ever unavailable, prefer WinUI's #2C2C2C fallback over
+            // the visibly washed-out untinted transient backdrop.
+            _systemBackdropEnabled = false;
+            return;
+        }
+
+        // Light mode intentionally keeps Windows' bright transient Acrylic.
+        var backdropType = DwmsbtTransientWindow;
+        var backdropResult = DwmSetWindowAttribute(
+            window,
+            DwmwaSystemBackdropType,
+            ref backdropType,
+            sizeof(int));
+        _systemBackdropEnabled = backdropResult >= 0 && frameResult >= 0;
+    }
+
+    private static bool SetAcrylicAccentPolicy(IntPtr window, bool enabled)
+    {
+        var policy = new AccentPolicy
+        {
+            AccentState = enabled ? AccentEnableAcrylicBlurBehind : AccentDisabled,
+            AccentFlags = 0,
+            GradientColor = enabled ? DarkAcrylicGradientColor : 0,
+            AnimationId = 0,
+        };
+
+        var policyPointer = Marshal.AllocHGlobal(Marshal.SizeOf<AccentPolicy>());
+        try
+        {
+            Marshal.StructureToPtr(policy, policyPointer, false);
+            var data = new WindowCompositionAttribData
+            {
+                Attribute = WcaAccentPolicy,
+                Data = policyPointer,
+                SizeOfData = (nuint)Marshal.SizeOf<AccentPolicy>(),
+            };
+            return SetWindowCompositionAttribute(window, ref data);
+        }
+        catch (EntryPointNotFoundException)
+        {
+            return false;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(policyPointer);
+        }
     }
 
     /// <summary>
@@ -1425,21 +1656,6 @@ internal static class HardwareUiWindow
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr window, int command);
 
-    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
-    private static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
-
-    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
-    private static extern IntPtr SetWindowLongPtr(IntPtr window, int index, IntPtr newValue);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool SetLayeredWindowAttributes(IntPtr window, uint colorKey, byte alpha, uint flags);
-
-    [DllImport("kernel32.dll")]
-    private static extern ulong GetTickCount64();
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool AnimateWindow(IntPtr window, uint timeMilliseconds, uint flags);
-
     [DllImport("user32.dll")]
     private static extern bool UpdateWindow(IntPtr window);
 
@@ -1532,8 +1748,19 @@ internal static class HardwareUiWindow
         uint pitchAndFamily,
         string faceName);
 
+    [DllImport("user32.dll")]
+    private static extern bool SetWindowCompositionAttribute(
+        IntPtr window,
+        ref WindowCompositionAttribData data);
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmFlush();
+
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int attributeValue, int attributeSize);
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmExtendFrameIntoClientArea(IntPtr window, ref Margins margins);
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmGetColorizationColor(out uint colorizationColor, out bool opaqueBlend);
@@ -1607,6 +1834,32 @@ internal static class HardwareUiWindow
         public int Top;
         public int Right;
         public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct AccentPolicy
+    {
+        public int AccentState;
+        public int AccentFlags;
+        public uint GradientColor;
+        public int AnimationId;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WindowCompositionAttribData
+    {
+        public int Attribute;
+        public IntPtr Data;
+        public nuint SizeOfData;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Margins
+    {
+        public int cxLeftWidth;
+        public int cxRightWidth;
+        public int cyTopHeight;
+        public int cyBottomHeight;
     }
 
     [StructLayout(LayoutKind.Sequential)]
