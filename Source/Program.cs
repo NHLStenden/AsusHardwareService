@@ -37,6 +37,10 @@ builder.Services.AddSingleton<DisplayController>();
 builder.Services.AddSingleton<SplendidProfileApplier>();
 builder.Services.AddSingleton<MicController>();
 builder.Services.AddSingleton<HardwareUiNotifier>();
+builder.Services.AddSingleton<IHardwareStatusPublisher>(services =>
+    services.GetRequiredService<HardwareUiNotifier>());
+builder.Services.AddSingleton<IHardwareUiLifecycle>(services =>
+    services.GetRequiredService<HardwareUiNotifier>());
 builder.Services.AddSingleton<PerformanceGpuController>();
 builder.Services.AddHostedService<HardwareServiceWorker>();
 await builder.Build().RunAsync();

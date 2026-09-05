@@ -3,7 +3,7 @@ namespace AsusHardwareService;
 /// <summary>
 /// Starts or notifies the lightweight hardware status UI in the active user session.
 /// </summary>
-public sealed class HardwareUiNotifier
+public sealed class HardwareUiNotifier : IHardwareStatusPublisher, IHardwareUiLifecycle
 {
     private readonly ILogger<HardwareUiNotifier> _logger;
 
@@ -14,6 +14,33 @@ public sealed class HardwareUiNotifier
     public HardwareUiNotifier(ILogger<HardwareUiNotifier> logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    /// <summary>
+    /// Publishes a hardware state update to the active interactive user session.
+    /// </summary>
+    /// <param name="status">The hardware state to publish.</param>
+    public void Publish(HardwareStatus status)
+    {
+        ArgumentNullException.ThrowIfNull(status);
+
+        switch (status)
+        {
+            case MicrophoneStatus microphone:
+                ShowMicrophoneStatus(microphone.Muted);
+                break;
+            case KeyboardBacklightStatus keyboardBacklight:
+                ShowKeyboardBacklightStatus(keyboardBacklight.Level);
+                break;
+            case DisplayBrightnessStatus displayBrightness:
+                ShowDisplayBrightnessStatus(displayBrightness.Percentage);
+                break;
+            case PerformanceGpuStatus performanceGpu:
+                ShowPerformanceGpuStatus(performanceGpu.PerformanceMode, performanceGpu.GpuMode);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(status), status, "Unsupported hardware status type.");
+        }
     }
 
     /// <summary>

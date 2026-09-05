@@ -29,7 +29,8 @@ public sealed class HardwareServiceWorker : BackgroundService
     private readonly DisplayController _displayController;
     private readonly SplendidProfileApplier _splendidProfileApplier;
     private readonly MicController _micController;
-    private readonly HardwareUiNotifier _hardwareUiNotifier;
+    private readonly IHardwareStatusPublisher _hardwareStatusPublisher;
+    private readonly IHardwareUiLifecycle _hardwareUiLifecycle;
     private readonly PerformanceGpuController _performanceGpuController;
     private readonly IOptionsMonitor<HardwareOptions> _options;
     private int? _lastSessionId;
@@ -46,7 +47,8 @@ public sealed class HardwareServiceWorker : BackgroundService
     /// <param name="displayController">The display controller.</param>
     /// <param name="splendidProfileApplier">The colour profile launcher and applier.</param>
     /// <param name="micController">The microphone mute controller.</param>
-    /// <param name="hardwareUiNotifier">The interactive hardware status UI notifier.</param>
+    /// <param name="hardwareStatusPublisher">Publishes hardware status updates to the presentation layer.</param>
+    /// <param name="hardwareUiLifecycle">Controls the resident hardware UI lifetime for interactive sessions.</param>
     /// <param name="performanceGpuController">The combined performance and GPU mode manager.</param>
     /// <param name="options">The configured hardware service options.</param>
     public HardwareServiceWorker(
@@ -58,7 +60,8 @@ public sealed class HardwareServiceWorker : BackgroundService
         DisplayController displayController,
         SplendidProfileApplier splendidProfileApplier,
         MicController micController,
-        HardwareUiNotifier hardwareUiNotifier,
+        IHardwareStatusPublisher hardwareStatusPublisher,
+        IHardwareUiLifecycle hardwareUiLifecycle,
         PerformanceGpuController performanceGpuController,
         IOptionsMonitor<HardwareOptions> options)
     {
@@ -70,7 +73,8 @@ public sealed class HardwareServiceWorker : BackgroundService
         _displayController = displayController ?? throw new ArgumentNullException(nameof(displayController));
         _splendidProfileApplier = splendidProfileApplier ?? throw new ArgumentNullException(nameof(splendidProfileApplier));
         _micController = micController ?? throw new ArgumentNullException(nameof(micController));
-        _hardwareUiNotifier = hardwareUiNotifier ?? throw new ArgumentNullException(nameof(hardwareUiNotifier));
+        _hardwareStatusPublisher = hardwareStatusPublisher ?? throw new ArgumentNullException(nameof(hardwareStatusPublisher));
+        _hardwareUiLifecycle = hardwareUiLifecycle ?? throw new ArgumentNullException(nameof(hardwareUiLifecycle));
         _performanceGpuController = performanceGpuController ?? throw new ArgumentNullException(nameof(performanceGpuController));
         _options = options ?? throw new ArgumentNullException(nameof(options));
     }
@@ -182,7 +186,7 @@ public sealed class HardwareServiceWorker : BackgroundService
                 sessionId,
                 session?.SessionId);
 
-            _hardwareUiNotifier.StopUiInSession(sessionId);
+            _hardwareUiLifecycle.StopUiInSession(sessionId);
 
             if (session is null)
             {
@@ -201,14 +205,14 @@ public sealed class HardwareServiceWorker : BackgroundService
         var activeSessionId = UserSessionHelper.GetActiveInteractiveSession()?.SessionId;
         if (_lastSessionId.HasValue)
         {
-            _hardwareUiNotifier.StopUiInSession(_lastSessionId.Value);
+            _hardwareUiLifecycle.StopUiInSession(_lastSessionId.Value);
         }
 
         // A hotkey can start the UI just before the session monitor records that session. Close the
         // currently active UI as well so a normal service stop does not rely on the watchdog delay.
         if (activeSessionId.HasValue && activeSessionId != _lastSessionId)
         {
-            _hardwareUiNotifier.StopUiInSession(activeSessionId.Value);
+            _hardwareUiLifecycle.StopUiInSession(activeSessionId.Value);
         }
 
         await base.StopAsync(cancellationToken);
@@ -229,31 +233,31 @@ public sealed class HardwareServiceWorker : BackgroundService
                     var decreasedKeyboardLevel = _keyboardBacklightController.Decrease();
                     if (decreasedKeyboardLevel.HasValue)
                     {
-                        _hardwareUiNotifier.ShowKeyboardBacklightStatus(decreasedKeyboardLevel.Value);
+                        _hardwareStatusPublisher.Publish(new KeyboardBacklightStatus(decreasedKeyboardLevel.Value));
                     }
                     break;
                 case FnPlusF3:
                     var increasedKeyboardLevel = _keyboardBacklightController.Increase();
                     if (increasedKeyboardLevel.HasValue)
                     {
-                        _hardwareUiNotifier.ShowKeyboardBacklightStatus(increasedKeyboardLevel.Value);
+                        _hardwareStatusPublisher.Publish(new KeyboardBacklightStatus(increasedKeyboardLevel.Value));
                     }
                     break;
 
                 case FnPlusF7:
                     var decreasedBrightness = _brightnessController.Decrease();
-                    _hardwareUiNotifier.ShowDisplayBrightnessStatus(decreasedBrightness);
+                    _hardwareStatusPublisher.Publish(new DisplayBrightnessStatus(decreasedBrightness));
                     break;
                 case FnPlusF8:
                     var increasedBrightness = _brightnessController.Increase();
-                    _hardwareUiNotifier.ShowDisplayBrightnessStatus(increasedBrightness);
+                    _hardwareStatusPublisher.Publish(new DisplayBrightnessStatus(increasedBrightness));
                     break;
 
                 case FnPlusM3:
                     var micMuted = _micController.Toggle();
                     if (micMuted.HasValue)
                     {
-                        _hardwareUiNotifier.ShowMicrophoneStatus(micMuted.Value);
+                        _hardwareStatusPublisher.Publish(new MicrophoneStatus(micMuted.Value));
                     }
                     break;
 
@@ -263,9 +267,9 @@ public sealed class HardwareServiceWorker : BackgroundService
                         currentCombinedMode.performanceMode,
                         currentCombinedMode.gpuMode);
                     _expectedCombinedMode = requestedCombinedMode;
-                    _hardwareUiNotifier.ShowPerformanceGpuStatus(
+                    _hardwareStatusPublisher.Publish(new PerformanceGpuStatus(
                         requestedCombinedMode.performanceMode,
-                        requestedCombinedMode.gpuMode);
+                        requestedCombinedMode.gpuMode));
                     _ = ApplyRequestedPerformanceGpuModeAsync(requestedCombinedMode, _stoppingToken);
                     break;
                 case FnPlusM5:
