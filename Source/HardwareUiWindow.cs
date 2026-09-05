@@ -53,6 +53,7 @@ internal static class HardwareUiWindow
     private const uint MonitorDefaultToPrimary = 0x00000001;
     private const uint MonitorDefaultToNearest = 0x00000002;
 
+    private const int DwmTransitionOwnedWindowReposition = 0;
     private const int DwmwaUseImmersiveDarkMode = 20;
     private const int DwmwaWindowCornerPreference = 33;
     private const int DwmwaSystemBackdropType = 38;
@@ -94,12 +95,15 @@ internal static class HardwareUiWindow
     private const int NullBrush = 5;
     private const int NullPen = 8;
 
-    // Match the native hardware indicator's motion with translation only: a fast entrance and
-    // a more relaxed return toward the screen edge. 83 ms is an opacity-oriented WinUI token;
-    // using it for the complete translation undersamples the movement on high-refresh displays.
+    // Use the current Windows motion fast-duration token for both the direct entrance and exit.
+    // 83 ms is an opacity-oriented token; using it for the full Y translation would be too abrupt.
     private const uint ShowAnimationMilliseconds = 167;
-    private const uint HideAnimationMilliseconds = 250;
+    private const uint HideAnimationMilliseconds = 167;
     private const int FlyoutAnimationDistanceDip = 20;
+    // A compositor can follow the Fluent curves at fractional coordinates; an HWND cannot.
+    // Limit the instantaneous HWND velocity to 1.5 times the average animation velocity so the
+    // endpoint-heavy Fluent curves cannot collapse into a large whole-pixel jump.
+    private const double MaxAnimationVelocityMultiplier = 1.5;
     private const uint HideDelayMilliseconds = 1500;
     // Graceful service/session changes send WM_CLOSE immediately. This low-frequency Win32
     // watchdog is only a fallback for abrupt service termination or a missed session transition.
@@ -116,6 +120,7 @@ internal static class HardwareUiWindow
     private static readonly IntPtr HwndTopmost = new(-1);
     private static readonly IntPtr DpiAwarenessContextPerMonitorAwareV2 = new(-4);
     private static readonly UIntPtr HideTimerId = (UIntPtr)1u;
+    private static readonly UIntPtr DwmAnimationTimerId = (UIntPtr)2u;
     private static readonly UIntPtr ServiceWatchTimerId = (UIntPtr)3u;
     private static readonly WindowProcedureDelegate WindowProcedureCallback = WindowProcedure;
 
@@ -132,11 +137,14 @@ internal static class HardwareUiWindow
     private static uint _windowDpi = 96;
     private static bool _showAnimationActive;
     private static bool _hideAnimationActive;
+    private static bool _dwmTransitionActive;
     private static bool _systemBackdropEnabled;
     private static long _animationStartTimestamp;
+    private static long _animationLastFrameTimestamp;
     private static int _animationStartY;
     private static int _animationEndY;
-    private static int _animationLastY;
+    private static double _animationCurrentY;
+    private static int _animationLastPresentedY;
     private static uint _animationDurationMilliseconds;
     private static bool _animationIncoming;
     private static uint _animationGeneration;
@@ -320,6 +328,14 @@ internal static class HardwareUiWindow
                     return IntPtr.Zero;
                 }
 
+                if (wParam == DwmAnimationTimerId)
+                {
+                    KillTimer(window, DwmAnimationTimerId);
+                    _dwmTransitionActive = false;
+                    FinishWindowAnimation(window);
+                    return IntPtr.Zero;
+                }
+
                 if (wParam == HideTimerId)
                 {
                     KillTimer(window, HideTimerId);
@@ -362,6 +378,7 @@ internal static class HardwareUiWindow
 
             case WmClose:
                 KillTimer(window, HideTimerId);
+                KillTimer(window, DwmAnimationTimerId);
                 CancelShowAnimation(window);
                 CancelHideAnimation(window);
                 KillTimer(window, ServiceWatchTimerId);
@@ -460,6 +477,7 @@ internal static class HardwareUiWindow
             return;
         }
 
+        CancelDwmTransition(window);
         _showAnimationActive = false;
         SetStatusWindowPosition(window, _finalY, show: true);
     }
@@ -478,14 +496,41 @@ internal static class HardwareUiWindow
             return;
         }
 
-        var distance = Scale(FlyoutAnimationDistanceDip, _windowDpi);
-        var direction = _indicatorPosition == IndicatorPosition.BottomCenter ? 1 : -1;
         BeginWindowAnimation(
             window,
             _finalY,
-            _finalY + (direction * distance),
+            GetOffScreenHideY(window),
             HideAnimationMilliseconds,
             incoming: false);
+    }
+
+
+    private static int GetOffScreenHideY(IntPtr window)
+    {
+        var monitor = MonitorFromWindow(window, MonitorDefaultToNearest);
+        var monitorInfo = new MonitorInfo
+        {
+            cbSize = (uint)Marshal.SizeOf<MonitorInfo>(),
+        };
+
+        if (monitor != IntPtr.Zero && GetMonitorInfo(monitor, ref monitorInfo))
+        {
+            // Windows motion uses the fast 167 ms exit token for transient UI. The DWM
+            // reposition transition does not expose a duration, so aim its destination a little
+            // beyond the physical monitor edge. This makes the flyout fully clear the screen
+            // during the visible part of the transition instead of appearing to linger at the edge.
+            // Use rcMonitor rather than rcWork so the taskbar remains part of the exit path.
+            var overshoot = Math.Max(1, _windowHeight / 2);
+            return _indicatorPosition == IndicatorPosition.BottomCenter
+                ? monitorInfo.rcMonitor.Bottom + overshoot
+                : monitorInfo.rcMonitor.Top - _windowHeight - overshoot;
+        }
+
+        // Keep the previous 20-DIP endpoint as a defensive fallback if monitor information
+        // cannot be obtained.
+        var distance = Scale(FlyoutAnimationDistanceDip, _windowDpi);
+        var direction = _indicatorPosition == IndicatorPosition.BottomCenter ? 1 : -1;
+        return _finalY + (direction * distance);
     }
 
     private static void CancelHideAnimation(IntPtr window)
@@ -495,6 +540,7 @@ internal static class HardwareUiWindow
             return;
         }
 
+        CancelDwmTransition(window);
         _hideAnimationActive = false;
         SetStatusWindowPosition(window, _finalY, show: true);
     }
@@ -514,14 +560,23 @@ internal static class HardwareUiWindow
 
         _animationStartY = startY;
         _animationEndY = endY;
-        _animationLastY = startY;
+        _animationCurrentY = startY;
+        _animationLastPresentedY = startY;
         _animationDurationMilliseconds = durationMilliseconds;
         _animationIncoming = incoming;
         _showAnimationActive = incoming;
         _hideAnimationActive = !incoming;
 
-        // Keep the normal DWM-backed HWND intact. Present the exact first position before the
-        // high-resolution clock starts so the first animation sample is not skipped.
+        // DwmTransitionOwnedWindow is the smallest native path that asks DWM itself to coordinate
+        // a tool-window reposition. Keep the existing sampled HWND animation as a fallback for
+        // systems where the transition API is unavailable or rejects this window.
+        if (TryBeginDwmTransitionAnimation(window, startY, endY, durationMilliseconds))
+        {
+            return;
+        }
+
+        // Fallback: keep the normal DWM-backed HWND intact. Present the exact first position before
+        // the high-resolution clock starts so the first animation sample is not skipped.
         SetStatusWindowPosition(window, startY, show: true);
         UpdateWindow(window);
         if (DwmFlush() < 0)
@@ -531,7 +586,51 @@ internal static class HardwareUiWindow
         }
 
         _animationStartTimestamp = Stopwatch.GetTimestamp();
+        _animationLastFrameTimestamp = _animationStartTimestamp;
         PostAnimationFrame(window, _animationGeneration);
+    }
+
+    private static bool TryBeginDwmTransitionAnimation(
+        IntPtr window,
+        int startY,
+        int endY,
+        uint durationMilliseconds)
+    {
+        // Commit the source rect first. DWM can then transition the tool window from that
+        // presented rect to the single reposition below instead of us moving it every frame.
+        SetStatusWindowPosition(window, startY, show: true);
+        UpdateWindow(window);
+        if (DwmFlush() < 0)
+        {
+            return false;
+        }
+
+        MoveStatusWindow(window, endY);
+        if (DwmTransitionOwnedWindow(window, DwmTransitionOwnedWindowReposition) < 0)
+        {
+            MoveStatusWindow(window, startY);
+            return false;
+        }
+
+        _dwmTransitionActive = true;
+        if (SetTimer(window, DwmAnimationTimerId, durationMilliseconds, IntPtr.Zero) == UIntPtr.Zero)
+        {
+            _dwmTransitionActive = false;
+            FinishWindowAnimation(window);
+        }
+
+        return true;
+    }
+
+    private static void CancelDwmTransition(IntPtr window)
+    {
+        if (!_dwmTransitionActive)
+        {
+            return;
+        }
+
+        KillTimer(window, DwmAnimationTimerId);
+        _dwmTransitionActive = false;
     }
 
     private static void AdvanceWindowAnimation(IntPtr window, uint generation)
@@ -542,24 +641,55 @@ internal static class HardwareUiWindow
             return;
         }
 
-        var elapsedTicks = Stopwatch.GetTimestamp() - _animationStartTimestamp;
-        var durationTicks = Stopwatch.Frequency * (_animationDurationMilliseconds / 1000.0);
+        var now = Stopwatch.GetTimestamp();
+        var elapsedTicks = now - _animationStartTimestamp;
+        var frameTicks = Math.Max(0L, now - _animationLastFrameTimestamp);
+        _animationLastFrameTimestamp = now;
+
+        var durationSeconds = _animationDurationMilliseconds / 1000.0;
+        var durationTicks = Stopwatch.Frequency * durationSeconds;
         var progress = durationTicks <= 0.0
             ? 1.0
             : Math.Clamp(elapsedTicks / durationTicks, 0.0, 1.0);
         var easedProgress = _animationIncoming
             ? EaseIncoming(progress)
             : EaseOutgoing(progress);
-        var y = (int)Math.Round(
-            _animationStartY + ((_animationEndY - _animationStartY) * easedProgress));
+        var desiredY = _animationStartY +
+            ((_animationEndY - _animationStartY) * easedProgress);
 
-        if (y != _animationLastY)
+        // The Fluent easing curves are designed for compositor transforms, where fractional
+        // positions are cheap. SetWindowPos accepts whole pixels only, so sampling the curves
+        // directly can turn their endpoint velocity into a visible multi-pixel jump, especially
+        // at 60 Hz and higher DPI. Keep a fractional position and velocity-limit only the HWND
+        // adaptation; the requested curve remains the source of the desired position.
+        var frameSeconds = frameTicks / (double)Stopwatch.Frequency;
+        var animationDistance = Math.Abs(_animationEndY - _animationStartY);
+        var averageVelocity = durationSeconds <= 0.0
+            ? double.PositiveInfinity
+            : animationDistance / durationSeconds;
+        var maxFrameTravel = averageVelocity *
+            MaxAnimationVelocityMultiplier * frameSeconds;
+
+        if (durationSeconds <= 0.0)
         {
-            MoveStatusWindow(window, y);
-            _animationLastY = y;
+            _animationCurrentY = desiredY;
+        }
+        else if (maxFrameTravel > 0.0)
+        {
+            _animationCurrentY = MoveToward(
+                _animationCurrentY,
+                desiredY,
+                maxFrameTravel);
         }
 
-        if (progress >= 1.0)
+        var y = (int)Math.Round(_animationCurrentY);
+        if (y != _animationLastPresentedY)
+        {
+            MoveStatusWindow(window, y);
+            _animationLastPresentedY = y;
+        }
+
+        if (progress >= 1.0 && Math.Abs(_animationCurrentY - _animationEndY) < 0.5)
         {
             FinishWindowAnimation(window);
             return;
@@ -580,6 +710,17 @@ internal static class HardwareUiWindow
     private static void PostAnimationFrame(IntPtr window, uint generation)
     {
         PostMessage(window, WmAnimationFrame, new UIntPtr(generation), IntPtr.Zero);
+    }
+
+    private static double MoveToward(double current, double target, double maxDistance)
+    {
+        var remaining = target - current;
+        if (Math.Abs(remaining) <= maxDistance)
+        {
+            return target;
+        }
+
+        return current + (Math.Sign(remaining) * maxDistance);
     }
 
     private static void FinishWindowAnimation(IntPtr window)
@@ -1752,6 +1893,9 @@ internal static class HardwareUiWindow
     private static extern bool SetWindowCompositionAttribute(
         IntPtr window,
         ref WindowCompositionAttribData data);
+
+    [DllImport("dwmapi.dll", ExactSpelling = true)]
+    private static extern int DwmTransitionOwnedWindow(IntPtr window, int target);
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmFlush();
