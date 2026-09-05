@@ -8,7 +8,6 @@ The service runs in the background and handles a small set of ASUS-specific hard
 
 - applies a configured battery charge limit at startup
 - listens for ASUS HID hotkey events
-- shows native Win32 status flyouts for microphone, brightness, keyboard backlight, and performance/GPU changes
 - adjusts built-in display brightness
 - adjusts keyboard backlight brightness
 - applies ASUS Splendid display color settings
@@ -26,7 +25,7 @@ dotnet publish -c Release -r win-x64 --self-contained true
 ```
 ## Install and run
 
-After publishing, install the executable with `sc.exe` and start the service. The same executable also hosts the lightweight user-session flyout; no separate UI executable is installed. The flyout exits when the service stops or the interactive session ends.
+After publishing, install the executable with `sc.exe` and start the service.
 
 Replace `AsusHardwareService.exe` below with the actual published executable name from your project.
 
