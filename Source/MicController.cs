@@ -22,7 +22,10 @@ public sealed class MicController
     /// <summary>
     /// Toggles the built in microphone on or off.
     /// </summary>
-    public void Toggle()
+    /// <returns>
+    /// The new mute state, or <see langword="null"/> when no default capture device was available.
+    /// </returns>
+    public bool? Toggle()
     {
         using var enumerator = new MMDeviceEnumerator();
         var devices = CaptureRoles
@@ -34,7 +37,7 @@ public sealed class MicController
         if (devices.Count == 0)
         {
             _logger.LogWarning("No default capture devices were found to toggle microphone mute.");
-            return;
+            return null;
         }
         var newMuteState = !devices[0].AudioEndpointVolume.Mute;
         foreach (var device in devices)
@@ -49,6 +52,8 @@ public sealed class MicController
             "Microphone mute toggled. New state: {MuteState}. Devices affected: {DeviceCount}.",
             newMuteState ? "Muted" : "Unmuted",
             devices.Count);
+
+        return newMuteState;
     }
     /// <summary>
     /// Tries to resolve the default capture endpoint for the specified role.

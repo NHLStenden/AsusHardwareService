@@ -40,16 +40,18 @@ public sealed class KeyboardBacklightController
     /// <summary>
     /// Decreases the keyboard backlight by one ASUS firmware level.
     /// </summary>
-    public void Decrease()
+    /// <returns>The resulting level, or <see langword="null"/> if the hardware command failed.</returns>
+    public int? Decrease()
     {
-        Adjust(-1);
+        return Adjust(-1);
     }
     /// <summary>
     /// Increases the keyboard backlight by one ASUS firmware level.
     /// </summary>
-    public void Increase()
+    /// <returns>The resulting level, or <see langword="null"/> if the hardware command failed.</returns>
+    public int? Increase()
     {
-        Adjust(1);
+        return Adjust(1);
     }
     /// <summary>
     /// Sets an explicit keyboard backlight level.
@@ -76,17 +78,18 @@ public sealed class KeyboardBacklightController
     /// Adjusts the current hardware level by the supplied delta.
     /// </summary>
     /// <param name="delta">The amount to add to the current level.</param>
-    private void Adjust(int delta)
+    /// <returns>The resulting level, or <see langword="null"/> if the hardware command failed.</returns>
+    private int? Adjust(int delta)
     {
         var current = GetCurrentLevel();
         var next = Math.Clamp(current + delta, MinimumLevel, MaximumLevel);
         if (next == current)
         {
             _logger.LogDebug("Keyboard backlight already at boundary level {Level}.", current);
-            return;
+            return current;
         }
 
-        SetLevel(next);
+        return SetLevel(next) ? next : null;
     }
     /// <summary>
     /// Reads the current keyboard backlight level from ASUS ACPI, falling back to the last known or configured level.

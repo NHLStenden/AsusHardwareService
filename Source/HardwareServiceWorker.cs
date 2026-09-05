@@ -29,9 +29,12 @@ public sealed class HardwareServiceWorker : BackgroundService
     private readonly DisplayController _displayController;
     private readonly SplendidProfileApplier _splendidProfileApplier;
     private readonly MicController _micController;
+    private readonly HardwareUiNotifier _hardwareUiNotifier;
     private readonly PerformanceGpuController _performanceGpuController;
     private readonly IOptionsMonitor<HardwareOptions> _options;
     private int? _lastSessionId;
+    private (PerformanceMode performanceMode, GpuMode gpuMode)? _expectedCombinedMode;
+    private CancellationToken _stoppingToken;
     /// <summary>
     /// Initialises a new instance of the <see cref="HardwareServiceWorker"/> class.
     /// </summary>
@@ -43,6 +46,7 @@ public sealed class HardwareServiceWorker : BackgroundService
     /// <param name="displayController">The display controller.</param>
     /// <param name="splendidProfileApplier">The colour profile launcher and applier.</param>
     /// <param name="micController">The microphone mute controller.</param>
+    /// <param name="hardwareUiNotifier">The interactive hardware status UI notifier.</param>
     /// <param name="performanceGpuController">The combined performance and GPU mode manager.</param>
     /// <param name="options">The configured hardware service options.</param>
     public HardwareServiceWorker(
@@ -54,6 +58,7 @@ public sealed class HardwareServiceWorker : BackgroundService
         DisplayController displayController,
         SplendidProfileApplier splendidProfileApplier,
         MicController micController,
+        HardwareUiNotifier hardwareUiNotifier,
         PerformanceGpuController performanceGpuController,
         IOptionsMonitor<HardwareOptions> options)
     {
@@ -65,6 +70,7 @@ public sealed class HardwareServiceWorker : BackgroundService
         _displayController = displayController ?? throw new ArgumentNullException(nameof(displayController));
         _splendidProfileApplier = splendidProfileApplier ?? throw new ArgumentNullException(nameof(splendidProfileApplier));
         _micController = micController ?? throw new ArgumentNullException(nameof(micController));
+        _hardwareUiNotifier = hardwareUiNotifier ?? throw new ArgumentNullException(nameof(hardwareUiNotifier));
         _performanceGpuController = performanceGpuController ?? throw new ArgumentNullException(nameof(performanceGpuController));
         _options = options ?? throw new ArgumentNullException(nameof(options));
     }
@@ -75,6 +81,7 @@ public sealed class HardwareServiceWorker : BackgroundService
     /// <returns>A task that completes when the worker shuts down.</returns>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        _stoppingToken = stoppingToken;
         _logger.LogInformation("Service started in Session 0.");
         _batteryChargeLimiter.ApplyChargeLimit();
         _displayController.ApplyConfiguredServiceDisplaySettings();
@@ -175,6 +182,8 @@ public sealed class HardwareServiceWorker : BackgroundService
                 sessionId,
                 session?.SessionId);
 
+            _hardwareUiNotifier.StopUiInSession(sessionId);
+
             if (session is null)
             {
                 _lastSessionId = null;
@@ -183,38 +192,87 @@ public sealed class HardwareServiceWorker : BackgroundService
         }
     }
     /// <summary>
+    /// Stops the resident UI cleanly before the service exits. The resident UI also checks the
+    /// service and active console session as a low-frequency fallback for abrupt lifecycle changes.
+    /// </summary>
+    /// <param name="cancellationToken">A token that signals cancellation of the stop operation.</param>
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        var activeSessionId = UserSessionHelper.GetActiveInteractiveSession()?.SessionId;
+        if (_lastSessionId.HasValue)
+        {
+            _hardwareUiNotifier.StopUiInSession(_lastSessionId.Value);
+        }
+
+        // A hotkey can start the UI just before the session monitor records that session. Close the
+        // currently active UI as well so a normal service stop does not rely on the watchdog delay.
+        if (activeSessionId.HasValue && activeSessionId != _lastSessionId)
+        {
+            _hardwareUiNotifier.StopUiInSession(activeSessionId.Value);
+        }
+
+        await base.StopAsync(cancellationToken);
+    }
+
+    /// <summary>
     /// Dispatches an ASUS HID event to the corresponding hardware action.
     /// </summary>
     /// <param name="eventId">The ASUS HID event identifier.</param>
-    /// <returns>A task that completes when the event has been handled.</returns>
-    private async Task HandleAsusEventAsync(int eventId)
+    /// <returns>A task that completes when the hotkey has been dispatched.</returns>
+    private Task HandleAsusEventAsync(int eventId)
     {
         try
         {
             switch (eventId)
             {
                 case FnPlusF2:
-                    _keyboardBacklightController.Decrease();
+                    var decreasedKeyboardLevel = _keyboardBacklightController.Decrease();
+                    if (decreasedKeyboardLevel.HasValue)
+                    {
+                        _hardwareUiNotifier.ShowKeyboardBacklightStatus(decreasedKeyboardLevel.Value);
+                    }
                     break;
                 case FnPlusF3:
-                    _keyboardBacklightController.Increase();
+                    var increasedKeyboardLevel = _keyboardBacklightController.Increase();
+                    if (increasedKeyboardLevel.HasValue)
+                    {
+                        _hardwareUiNotifier.ShowKeyboardBacklightStatus(increasedKeyboardLevel.Value);
+                    }
                     break;
 
                 case FnPlusF7:
-                    _brightnessController.Decrease();
+                    var decreasedBrightness = _brightnessController.Decrease();
+                    _hardwareUiNotifier.ShowDisplayBrightnessStatus(decreasedBrightness);
                     break;
                 case FnPlusF8:
-                    _brightnessController.Increase();
+                    var increasedBrightness = _brightnessController.Increase();
+                    _hardwareUiNotifier.ShowDisplayBrightnessStatus(increasedBrightness);
                     break;
 
                 case FnPlusM3:
-                    _micController.Toggle();
+                    var micMuted = _micController.Toggle();
+                    if (micMuted.HasValue)
+                    {
+                        _hardwareUiNotifier.ShowMicrophoneStatus(micMuted.Value);
+                    }
                     break;
 
                 case FnPlusM4:
-                    await _performanceGpuController.ToggleCombinedModeAsync(CancellationToken.None);
+                    var currentCombinedMode = _expectedCombinedMode ?? _performanceGpuController.GetCurrentCombinedMode();
+                    var requestedCombinedMode = PerformanceGpuController.GetNextCombinedMode(
+                        currentCombinedMode.performanceMode,
+                        currentCombinedMode.gpuMode);
+                    _expectedCombinedMode = requestedCombinedMode;
+                    _hardwareUiNotifier.ShowPerformanceGpuStatus(
+                        requestedCombinedMode.performanceMode,
+                        requestedCombinedMode.gpuMode);
+                    _ = ApplyRequestedPerformanceGpuModeAsync(requestedCombinedMode, _stoppingToken);
                     break;
                 case FnPlusM5:
+                    // This model-dependent ASUS app/ROG key has no service-owned hardware state to
+                    // report. Do not invent a state change merely to show an OSD.
+                    _logger.LogDebug("Ignoring ASUS HID event {EventId}: no hardware state change is configured.", eventId);
+                    break;
                 default:
                     _logger.LogDebug("Ignoring ASUS HID event {EventId}.", eventId);
                     break;
@@ -224,7 +282,50 @@ public sealed class HardwareServiceWorker : BackgroundService
         {
             _logger.LogError(ex, "Failed to handle ASUS HID event {EventId}.", eventId);
         }
+
+        return Task.CompletedTask;
     }
+
+    /// <summary>
+    /// Applies a requested combined performance/GPU mode without blocking subsequent HID events.
+    /// </summary>
+    /// <param name="requestedMode">The mode already presented to the user.</param>
+    /// <param name="cancellationToken">Stops an in-flight hardware transition with the service.</param>
+    private async Task ApplyRequestedPerformanceGpuModeAsync(
+        (PerformanceMode performanceMode, GpuMode gpuMode) requestedMode,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var changed = await _performanceGpuController.ApplyCombinedModeAsync(
+                requestedMode.performanceMode,
+                requestedMode.gpuMode,
+                cancellationToken).ConfigureAwait(false);
+            if (!changed)
+            {
+                _logger.LogWarning(
+                    "ASUS performance/GPU mode request did not complete: {PerformanceMode}/{GpuMode}.",
+                    requestedMode.performanceMode,
+                    requestedMode.gpuMode);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogDebug(
+                "Cancelled ASUS performance/GPU mode transition during service shutdown: {PerformanceMode}/{GpuMode}.",
+                requestedMode.performanceMode,
+                requestedMode.gpuMode);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Failed to apply ASUS performance/GPU mode {PerformanceMode}/{GpuMode}.",
+                requestedMode.performanceMode,
+                requestedMode.gpuMode);
+        }
+    }
+
     /// <summary>
     /// Applies the configured colour profile to a newly detected interactive session.
     /// </summary>

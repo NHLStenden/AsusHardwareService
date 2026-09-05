@@ -89,7 +89,8 @@ public sealed class BrightnessController
     /// Adjusts the current brightness by the specified delta.
     /// </summary>
     /// <param name="delta">The amount to add to the current brightness. Negative values reduce brightness.</param>
-    public void Adjust(int delta)
+    /// <returns>The resulting brightness percentage.</returns>
+    public int Adjust(int delta)
     {
         var current = Get();
         var next = Math.Clamp(current + delta, 0, 100);
@@ -97,25 +98,28 @@ public sealed class BrightnessController
         if (next == current)
         {
             _logger.LogDebug("Brightness already at boundary: {Brightness}%.", current);
-            return;
+            return current;
         }
         Set(next);
+        return next;
     }
 
     /// <summary>
     /// Increases brightness by the configured step size.
     /// </summary>
-    public void Increase()
+    /// <returns>The resulting brightness percentage.</returns>
+    public int Increase()
     {
-        Adjust(Math.Abs(_options.CurrentValue.BrightnessStep));
+        return Adjust(Math.Abs(_options.CurrentValue.BrightnessStep));
     }
 
     /// <summary>
     /// Decreases brightness by the configured step size.
     /// </summary>
-    public void Decrease()
+    /// <returns>The resulting brightness percentage.</returns>
+    public int Decrease()
     {
-        Adjust(-Math.Abs(_options.CurrentValue.BrightnessStep));
+        return Adjust(-Math.Abs(_options.CurrentValue.BrightnessStep));
     }
     /// <summary>
     /// Creates a WMI management class connected to the ASUS brightness namespace.

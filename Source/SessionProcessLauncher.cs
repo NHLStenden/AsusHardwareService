@@ -13,6 +13,7 @@ public static class SessionProcessLauncher
 {
     private const int CreateUnicodeEnvironment = 0x00000400;
     private const int CreateNewConsole = 0x00000010;
+    private const int CreateNoWindow = 0x08000000;
     private const int StartfUseShowWindow = 0x00000001;
     private const short SwHide = 0;
     private const uint TokenAssignPrimary = 0x0001;
@@ -64,6 +65,10 @@ public static class SessionProcessLauncher
     /// <param name="executablePath">The full path to the executable to start.</param>
     /// <param name="arguments">The command-line arguments to pass to the executable.</param>
     /// <param name="logger">The logger used to record success and failure details.</param>
+    /// <param name="createConsoleWindow">
+    /// <see langword="true"/> to create a hidden console for the process; <see langword="false"/>
+    /// to run a console-subsystem executable without allocating a console window.
+    /// </param>
     /// <returns>
     /// <see langword="true"/> if the process was started successfully; otherwise, <see langword="false"/>.
     /// </returns>
@@ -71,7 +76,8 @@ public static class SessionProcessLauncher
         int sessionId,
         string executablePath,
         string arguments,
-        ILogger logger)
+        ILogger logger,
+        bool createConsoleWindow = true)
     {
         IntPtr userToken = IntPtr.Zero;
         IntPtr primaryToken = IntPtr.Zero;
@@ -113,6 +119,8 @@ public static class SessionProcessLauncher
             };
             var commandLine = BuildCommandLine(executablePath, arguments);
             var workingDirectory = Path.GetDirectoryName(executablePath);
+            var creationFlags = CreateUnicodeEnvironment |
+                (createConsoleWindow ? CreateNewConsole : CreateNoWindow);
             var created = CreateProcessAsUser(
                 primaryToken,
                 null,
@@ -120,7 +128,7 @@ public static class SessionProcessLauncher
                 IntPtr.Zero,
                 IntPtr.Zero,
                 false,
-                CreateUnicodeEnvironment | CreateNewConsole,
+                creationFlags,
                 environmentBlock,
                 workingDirectory,
                 ref startupInfo,

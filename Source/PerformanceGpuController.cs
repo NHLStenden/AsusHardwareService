@@ -32,6 +32,11 @@ public enum GpuChangeResult
     Blocked,
 
     /// <summary>
+    /// The GPU mode command failed or could not be verified.
+    /// </summary>
+    Failed,
+
+    /// <summary>
     /// GPU mode control is not supported on the current device.
     /// </summary>
     Unsupported,
@@ -87,17 +92,24 @@ public sealed class PerformanceGpuController
     /// <summary>
     /// Switches to the next combined performance and GPU mode pair.
     /// </summary>
-    public async Task ToggleCombinedModeAsync(CancellationToken cancellationToken = default)
+    /// <returns>The resulting tracked mode pair, or <see langword="null"/> when the complete mode change failed.</returns>
+    public async Task<(PerformanceMode performanceMode, GpuMode gpuMode)?> ToggleCombinedModeAsync(
+        CancellationToken cancellationToken = default)
     {
         var currentMode = GetCurrentCombinedMode();
         var nextMode = GetNextCombinedMode(currentMode.performanceMode, currentMode.gpuMode);
 
-        await ApplyCombinedModeAsync(nextMode.performanceMode, nextMode.gpuMode, cancellationToken).ConfigureAwait(false);
+        var changed = await ApplyCombinedModeAsync(
+            nextMode.performanceMode,
+            nextMode.gpuMode,
+            cancellationToken).ConfigureAwait(false);
+        return changed ? GetCurrentCombinedMode() : null;
     }
     /// <summary>
     /// Applies a combined performance and GPU mode pair.
     /// </summary>
-    public async Task ApplyCombinedModeAsync(
+    /// <returns><see langword="true"/> when both requested modes were applied or already active.</returns>
+    public async Task<bool> ApplyCombinedModeAsync(
         PerformanceMode performanceMode,
         GpuMode gpuMode,
         CancellationToken cancellationToken = default)
@@ -110,23 +122,30 @@ public sealed class PerformanceGpuController
                 performanceMode,
                 gpuMode);
             var performanceResult = SetPerformanceMode(performanceMode);
-            if (performanceResult != 1)
+            var performanceSucceeded = performanceResult == 1;
+            if (!performanceSucceeded)
             {
                 _logger.LogWarning(
                     "Setting performance mode to {PerformanceMode} returned {Result}.",
                     performanceMode,
                     performanceResult);
             }
+            else
+            {
+                CurrentPerformanceMode = performanceMode;
+            }
+
             var gpuResult = await SetGpuModeAsync(gpuMode, cancellationToken).ConfigureAwait(false);
-            if (gpuResult is not (GpuChangeResult.Changed or GpuChangeResult.NoChange))
+            var gpuSucceeded = gpuResult is GpuChangeResult.Changed or GpuChangeResult.NoChange;
+            if (!gpuSucceeded)
             {
                 _logger.LogWarning(
                     "Setting GPU mode to {GpuMode} returned {Result}.",
                     gpuMode,
                     gpuResult);
             }
-            CurrentPerformanceMode = performanceMode;
-            CurrentGpuMode = gpuMode;
+
+            return performanceSucceeded && gpuSucceeded;
         }
         finally
         {
@@ -190,13 +209,18 @@ public sealed class PerformanceGpuController
                 return GpuChangeResult.Blocked;
             }
 
-            await ApplyEcoModeTransitionAsync(enableEcoMode: true, cancellationToken).ConfigureAwait(false);
-            CurrentGpuMode = GpuMode.Eco;
-            return GpuChangeResult.Changed;
+            if (!await ApplyEcoModeTransitionAsync(enableEcoMode: true, cancellationToken).ConfigureAwait(false))
+            {
+                return GpuChangeResult.Failed;
+            }
         }
-        await ApplyEcoModeTransitionAsync(enableEcoMode: false, cancellationToken).ConfigureAwait(false);
-        CurrentGpuMode = GpuMode.Standard;
-        return GpuChangeResult.Changed;
+        else if (!await ApplyEcoModeTransitionAsync(enableEcoMode: false, cancellationToken).ConfigureAwait(false))
+        {
+            return GpuChangeResult.Failed;
+        }
+
+        var observedMode = RefreshGpuMode();
+        return observedMode == targetMode ? GpuChangeResult.Changed : GpuChangeResult.Failed;
     }
 
     /// <summary>
@@ -230,14 +254,24 @@ public sealed class PerformanceGpuController
     /// <summary>
     /// Applies the Eco mode transition sequence.
     /// </summary>
-    private async Task ApplyEcoModeTransitionAsync(bool enableEcoMode, CancellationToken cancellationToken)
+    /// <returns><see langword="true"/> when the ASUS ACPI write was accepted.</returns>
+    private async Task<bool> ApplyEcoModeTransitionAsync(bool enableEcoMode, CancellationToken cancellationToken)
     {
         if (enableEcoMode)
         {
             _logger.LogInformation("Preparing to enable Eco GPU mode.");
         }
 
-        _ = SetGpuEcoFlag(enableEcoMode ? 1 : 0);
+        var result = SetGpuEcoFlag(enableEcoMode ? 1 : 0);
+        if (result != 1)
+        {
+            _logger.LogWarning(
+                "Setting GPU Eco flag to {EcoFlag} returned {Result}.",
+                enableEcoMode ? 1 : 0,
+                result);
+            return false;
+        }
+
         await Task.Delay(500, cancellationToken).ConfigureAwait(false);
         if (!enableEcoMode)
         {
@@ -249,6 +283,7 @@ public sealed class PerformanceGpuController
             "Performance/GPU configuration remains {PerformanceMode}/{GpuMode} after GPU transition.",
             _options.CurrentValue.PerformanceMode,
             _options.CurrentValue.GpuMode);
+        return true;
     }
 
 }

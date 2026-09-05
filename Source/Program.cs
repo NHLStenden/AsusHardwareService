@@ -1,6 +1,11 @@
 using AsusHardwareService;
 using Microsoft.Extensions.Logging.EventLog;
 
+if (HardwareUiCommand.TryHandle(args, out var uiExitCode))
+{
+    return uiExitCode;
+}
+
 if (DisplayCommand.TryHandle(args, out var exitCode))
 {
     return exitCode;
@@ -31,6 +36,7 @@ builder.Services.AddSingleton<KeyboardBacklightController>();
 builder.Services.AddSingleton<DisplayController>();
 builder.Services.AddSingleton<SplendidProfileApplier>();
 builder.Services.AddSingleton<MicController>();
+builder.Services.AddSingleton<HardwareUiNotifier>();
 builder.Services.AddSingleton<PerformanceGpuController>();
 builder.Services.AddHostedService<HardwareServiceWorker>();
 await builder.Build().RunAsync();
