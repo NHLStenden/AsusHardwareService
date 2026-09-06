@@ -66,10 +66,10 @@ internal static class HardwareUiWindow
     private const int WcaAccentPolicy = 19;
     private const int AccentDisabled = 0;
     private const int AccentEnableAcrylicBlurBehind = 4;
-    // Accent-policy colours are AABBGGRR. This keeps the Shell's #2C2C2C dark Acrylic tint
-    // while retaining enough backdrop contribution to avoid the old opaque/fallback look.
-    private const uint DarkAcrylicGradientColor = 0xCC2C2C2C;
-    private const uint LightAcrylicGradientColor = 0xD6F9F9F9;
+    // Dark: just a touch denser
+    private const uint DarkAcrylicGradientColor = 0xD2303032;
+    // Light: less pure white, slightly warmer / denser
+    private const uint LightAcrylicGradientColor = 0xDCF3F3F0;
 
     private const uint SpiGetHighContrast = 0x0042;
     private const uint SpiGetClientAreaAnimation = 0x1042;
@@ -1570,7 +1570,7 @@ internal static class HardwareUiWindow
             return GetSysColor(ColorWindowText);
         }
 
-        return _isDarkTheme ? Rgb(255, 255, 255) : Rgb(30, 30, 30);
+        return _isDarkTheme ? Rgb(255, 255, 255) : Rgb(28, 28, 28);
     }
 
     private static uint GetAccentColor()
