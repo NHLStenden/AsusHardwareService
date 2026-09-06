@@ -124,7 +124,7 @@ public sealed class AsusAcpi : IDisposable
     public int GetRawDeviceValue(uint deviceId, string? logName = null)
     {
         ThrowIfDisposed();
-        Span<byte> arguments = stackalloc byte[4];
+        Span<byte> arguments = stackalloc byte[8];
         BinaryPrimitives.WriteUInt32LittleEndian(arguments, deviceId);
 
         var reply = InvokeMethod(ReadMethodId, arguments);
