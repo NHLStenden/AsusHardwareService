@@ -104,7 +104,7 @@ internal static class HardwareUiWindow
     // Limit the instantaneous HWND velocity to 1.5 times the average animation velocity so the
     // endpoint-heavy Fluent curves cannot collapse into a large whole-pixel jump.
     private const double MaxAnimationVelocityMultiplier = 1.5;
-    private const uint HideDelayMilliseconds = 1500;
+    private const uint HideDelayMilliseconds = 2000;
     // Graceful service/session changes send WM_CLOSE immediately. This low-frequency Win32
     // watchdog is only a fallback for abrupt service termination or a missed session transition.
     private const uint ServiceWatchIntervalMilliseconds = 5000;
@@ -425,7 +425,7 @@ internal static class HardwareUiWindow
         _windowDpi = dpi;
         _windowWidth = Scale(GetLogicalWindowWidth(_notification.Kind), dpi);
         _windowHeight = Scale(48, dpi);
-        var edgeMargin = Scale(16, dpi);
+        var edgeMargin = Scale(12, dpi);
         var workAreaWidth = monitorInfo.rcWork.Right - monitorInfo.rcWork.Left;
         _finalX = _indicatorPosition == IndicatorPosition.TopLeft
             ? monitorInfo.rcWork.Left + edgeMargin
@@ -924,9 +924,9 @@ internal static class HardwareUiWindow
             deviceContext,
             dpi,
             muted ? "Microphone muted" : "Microphone unmuted",
-            Scale(42, dpi),
+            Scale(48, dpi),
             0,
-            _windowWidth - Scale(12, dpi),
+            _windowWidth - Scale(16, dpi),
             _windowHeight);
     }
 
@@ -947,7 +947,7 @@ internal static class HardwareUiWindow
     {
         var foreground = GetPrimaryTextColor();
         DrawKeyboardIcon(deviceContext, dpi, foreground);
-        DrawLevelTrack(deviceContext, dpi, Math.Clamp(level, 0, 3) / 3.0);
+        DrawLevelTrack(deviceContext, dpi, Math.Clamp(level, 0, 3) / 3.0, rightPaddingDip: 40);
         DrawLevelValue(deviceContext, dpi, Math.Clamp(level, 0, 3).ToString());
     }
 
@@ -960,8 +960,7 @@ internal static class HardwareUiWindow
     {
         var foreground = GetPrimaryTextColor();
         DrawSunIcon(deviceContext, dpi, foreground);
-        DrawLevelTrack(deviceContext, dpi, Math.Clamp(brightness, 0, 100) / 100.0);
-        DrawLevelValue(deviceContext, dpi, Math.Clamp(brightness, 0, 100).ToString());
+        DrawLevelTrack(deviceContext, dpi, Math.Clamp(brightness, 0, 100) / 100.0, rightPaddingDip: 16);
     }
 
     private static void DrawSunIcon(IntPtr deviceContext, uint dpi, uint color)
@@ -981,7 +980,7 @@ internal static class HardwareUiWindow
             deviceContext,
             dpi,
             $"{performanceMode} · {gpuMode}",
-            Scale(42, dpi),
+            Scale(48, dpi),
             0,
             _windowWidth - Scale(16, dpi),
             _windowHeight);
@@ -1000,20 +999,25 @@ internal static class HardwareUiWindow
             color);
     }
 
-    private static void DrawLevelTrack(IntPtr deviceContext, uint dpi, double progress)
+    private static void DrawLevelTrack(
+        IntPtr deviceContext,
+        uint dpi,
+        double progress,
+        int rightPaddingDip)
     {
         progress = Math.Clamp(progress, 0.0, 1.0);
         var trackColor = _highContrast
             ? GetSysColor(ColorWindowText)
             : _isDarkTheme
-                ? Rgb(96, 96, 96)
-                : Rgb(190, 190, 190);
+                ? Rgb(160, 160, 160)
+                : Rgb(138, 138, 138);
         var accentColor = GetAccentColor();
 
-        // Native HWConfirmatorUI uses a 48-DIP plate, a 32-DIP icon button with 5-DIP trailing margin, and a 40-DIP value slot.
-        var trackLeft = Scale(42, dpi);
+        // Native hardware indicators place the level control 48 DIPs from the left edge.
+        // rightPaddingDip is 16 for the native brightness layout and 40 when a value slot is present.
+        var trackLeft = Scale(48, dpi);
         var trackTop = Scale(22, dpi);
-        var trackRight = _windowWidth - Scale(40, dpi);
+        var trackRight = _windowWidth - Scale(rightPaddingDip, dpi);
         var trackBottom = Scale(26, dpi);
         DrawFilledRoundRect(
             deviceContext,
@@ -1059,7 +1063,7 @@ internal static class HardwareUiWindow
         return kind switch
         {
             HardwareUiNotificationKind.KeyboardBacklight => 200,
-            HardwareUiNotificationKind.DisplayBrightness => 200,
+            HardwareUiNotificationKind.DisplayBrightness => 176,
             HardwareUiNotificationKind.Microphone => 224,
             HardwareUiNotificationKind.PerformanceGpuMode => 236,
             _ => 200,
@@ -1085,7 +1089,7 @@ internal static class HardwareUiWindow
         uint color)
     {
         var font = CreateFont(
-            -Scale(16, dpi),
+            -Scale(14, dpi),
             0,
             0,
             0,
@@ -1110,9 +1114,9 @@ internal static class HardwareUiWindow
             SetTextColor(deviceContext, color);
             var iconRect = new Rect
             {
-                Left = Scale(5, dpi),
+                Left = Scale(8, dpi),
                 Top = 0,
-                Right = Scale(37, dpi),
+                Right = Scale(40, dpi),
                 Bottom = _windowHeight - Scale(1, dpi),
             };
             DrawText(
