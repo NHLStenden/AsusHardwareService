@@ -61,6 +61,7 @@ internal static class HardwareUiWindow
     private const int DwmsbtNone = 1;
     private const int DwmsbtTransientWindow = 3;
     private const int DwmColorDefault = unchecked((int)0xFFFFFFFF);
+    private const int DwmColorNone = unchecked((int)0xFFFFFFFE);
 
     private const int WcaAccentPolicy = 19;
     private const int AccentDisabled = 0;
@@ -68,6 +69,7 @@ internal static class HardwareUiWindow
     // Accent-policy colours are AABBGGRR. This keeps the Shell's #2C2C2C dark Acrylic tint
     // while retaining enough backdrop contribution to avoid the old opaque/fallback look.
     private const uint DarkAcrylicGradientColor = 0xCC2C2C2C;
+    private const uint LightAcrylicGradientColor = 0xD6F9F9F9;
 
     private const uint SpiGetHighContrast = 0x0042;
     private const uint SpiGetClientAreaAnimation = 0x1042;
@@ -96,6 +98,10 @@ internal static class HardwareUiWindow
     private const int NullBrush = 5;
     private const int NullPen = 8;
     private const uint SrcCopy = 0x00CC0020;
+    private const uint DttTextColor = 0x00000001;
+    private const uint DttComposited = 0x00002000;
+    private const uint BiRgb = 0;
+    private const uint DibRgbColors = 0;
 
     // HKCU\...\Explorer\Accent\AccentPalette is eight 4-byte entries:
     // Light3, Light2, Light1, Accent, Dark1, Dark2, Dark3, Extra.
@@ -746,6 +752,14 @@ internal static class HardwareUiWindow
                 0,
                 0,
                 SrcCopy);
+
+            // GDI dark text on an extended glass frame is interpreted as transparent pixels.
+            // Repaint the light-theme foreground with DrawThemeTextEx(DTT_COMPOSITED), which
+            // writes the alpha channel DWM expects for dark glyphs/text on glass.
+            if (!_isDarkTheme && !_highContrast)
+            {
+                DrawLightForegroundComposited(window, paintDc);
+            }
         }
         finally
         {
@@ -927,7 +941,7 @@ internal static class HardwareUiWindow
             deviceContext,
             dpi,
             Math.Clamp(level, 0, 3) / 3.0,
-            leftPaddingDip: 40,
+            leftPaddingDip: 42,
             rightPaddingDip: 40);
         DrawLevelValue(deviceContext, dpi, Math.Clamp(level, 0, 3).ToString());
     }
@@ -937,7 +951,7 @@ internal static class HardwareUiWindow
         // The compact 192-DIP level template has a 40-DIP leading slot. Moving the window edges
         // inward without moving the glyph on screen requires the icon box to be 4..36 rather
         // than the 8..40 box used by the 48-DIP leading-slot templates.
-        DrawFluentIcon(deviceContext, dpi, KeyboardGlyph, color, 4, 36);
+        DrawFluentIcon(deviceContext, dpi, KeyboardGlyph, color, 2, 34);
     }
 
     private static void DrawDisplayBrightnessStatus(IntPtr deviceContext, uint dpi, int brightness)
@@ -999,20 +1013,17 @@ internal static class HardwareUiWindow
         var trackColor = _highContrast
             ? GetSysColor(ColorWindowText)
             : _isDarkTheme
-                // With the extended Acrylic frame, classic GDI colours are composited by DWM.
-                // #747474 lands at ~#9D9DA1 in the captured dark flyout, matching the native
-                // StrongFillColorDefault track much more closely than the previous #A0A0A0.
-                ? Rgb(116, 116, 116)
-                : Rgb(138, 138, 138);
+                ? Rgb(160, 160, 160)
+                : Rgb(124, 124, 124);
         var accentColor = GetAccentColor();
 
         // Brightness uses the 48-DIP leading slot. The compact level+value template is 192 DIPs
         // wide and uses 40 + 112 + 40 DIPs; keeping these as logical values makes the relationship
         // survive arbitrary per-monitor scaling instead of tuning physical pixels for one DPI.
         var trackLeft = Scale(leftPaddingDip, dpi);
-        var trackTop = Scale(22, dpi);
+        var trackTop = Scale(20, dpi);
         var trackRight = _windowWidth - Scale(rightPaddingDip, dpi);
-        var trackBottom = Scale(26, dpi);
+        var trackBottom = Scale(24, dpi);
         DrawFilledCapsule(
             deviceContext,
             trackLeft,
@@ -1037,7 +1048,7 @@ internal static class HardwareUiWindow
 
     private static void DrawLevelValue(IntPtr deviceContext, uint dpi, string value)
     {
-        var opticalOffset = ScaleHalfDip(3, dpi); // 1.5 DIPs; ~2 px at 125%, scales continuously.
+        var opticalOffset = ScaleHalfDip(4, dpi); // 2 DIPs; 3 px at 125%.
         DrawTextCore(
             deviceContext,
             dpi,
@@ -1083,6 +1094,10 @@ internal static class HardwareUiWindow
         int leftDip = 8,
         int rightDip = 40)
     {
+        if (!_isDarkTheme && !_highContrast)
+        {
+            return;
+        }
         var font = CreateFont(
             -Scale(14, dpi),
             0,
@@ -1140,6 +1155,10 @@ internal static class HardwareUiWindow
         int fontSizeDip,
         uint horizontalAlignment = DtLeft)
     {
+        if (!_isDarkTheme && !_highContrast)
+        {
+            return;
+        }
         var font = CreateFont(
             -Scale(fontSizeDip, dpi),
             0,
@@ -1177,6 +1196,192 @@ internal static class HardwareUiWindow
         {
             SelectObject(deviceContext, oldFont);
             DeleteObject(font);
+        }
+    }
+
+    private static void DrawLightForegroundComposited(IntPtr window, IntPtr deviceContext)
+    {
+        var dpi = GetDpiForWindow(window);
+        if (dpi == 0)
+        {
+            dpi = _windowDpi == 0 ? 96u : _windowDpi;
+        }
+
+        var color = GetPrimaryTextColor();
+        switch (_notification.Kind)
+        {
+            case HardwareUiNotificationKind.KeyboardBacklight:
+                DrawCompositedTextOnGlass(
+                    window, deviceContext, dpi, KeyboardGlyph,
+                    Scale(2, dpi), 0, Scale(34, dpi), _windowHeight - Scale(1, dpi),
+                    "Segoe Fluent Icons", 14, 400, DtCenter, color);
+
+                var opticalOffset = ScaleHalfDip(4, dpi);
+                DrawCompositedTextOnGlass(
+                    window, deviceContext, dpi, Math.Clamp(_notification.Value, 0, 3).ToString(),
+                    _windowWidth - Scale(40, dpi), -opticalOffset,
+                    _windowWidth, _windowHeight - Scale(2, dpi) - opticalOffset,
+                    "Segoe UI Variable Text", 14, 400, DtCenter, color);
+                break;
+
+            case HardwareUiNotificationKind.DisplayBrightness:
+                DrawCompositedTextOnGlass(
+                    window, deviceContext, dpi, BrightnessGlyph,
+                    Scale(8, dpi), 0, Scale(40, dpi), _windowHeight - Scale(1, dpi),
+                    "Segoe Fluent Icons", 14, 400, DtCenter, color);
+                break;
+
+            case HardwareUiNotificationKind.PerformanceGpuMode:
+                var silent = (_notification.Value & 1) != 0;
+                DrawCompositedTextOnGlass(
+                    window, deviceContext, dpi, silent ? SpeedMediumGlyph : SpeedHighGlyph,
+                    Scale(8, dpi), 0, Scale(40, dpi), _windowHeight - Scale(1, dpi),
+                    "Segoe Fluent Icons", 14, 400, DtCenter, color);
+
+                var performanceMode = silent ? "Silent" : "Performance";
+                var gpuMode = (_notification.Value & 2) != 0 ? "Eco" : "Standard";
+                DrawCompositedTextOnGlass(
+                    window, deviceContext, dpi, $"{performanceMode} · {gpuMode}",
+                    Scale(48, dpi), 0, _windowWidth - Scale(16, dpi), _windowHeight,
+                    "Segoe UI Variable Text", 14, 400, DtLeft, color);
+                break;
+
+            case HardwareUiNotificationKind.Microphone:
+            default:
+                var muted = _notification.Value != 0;
+                DrawCompositedTextOnGlass(
+                    window, deviceContext, dpi, muted ? MicrophoneOffGlyph : MicrophoneOnGlyph,
+                    Scale(8, dpi), 0, Scale(40, dpi), _windowHeight - Scale(1, dpi),
+                    "Segoe Fluent Icons", 14, 400, DtCenter, color);
+                DrawCompositedTextOnGlass(
+                    window, deviceContext, dpi,
+                    muted ? "Microphone muted" : "Microphone unmuted",
+                    Scale(48, dpi), 0, _windowWidth - Scale(16, dpi), _windowHeight,
+                    "Segoe UI Variable Text", 14, 400, DtLeft, color);
+                break;
+        }
+    }
+
+    private static void DrawCompositedTextOnGlass(
+        IntPtr window,
+        IntPtr targetDc,
+        uint dpi,
+        string text,
+        int left,
+        int top,
+        int right,
+        int bottom,
+        string fontFace,
+        int fontSizeDip,
+        int weight,
+        uint horizontalAlignment,
+        uint color)
+    {
+        var width = right - left;
+        var height = bottom - top;
+        if (targetDc == IntPtr.Zero || width <= 0 || height <= 0)
+        {
+            return;
+        }
+
+        var memoryDc = CreateCompatibleDC(targetDc);
+        if (memoryDc == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var bitmapInfo = new BitmapInfo
+        {
+            bmiHeader = new BitmapInfoHeader
+            {
+                biSize = (uint)Marshal.SizeOf<BitmapInfoHeader>(),
+                biWidth = width,
+                biHeight = -height, // DrawThemeTextEx compositing requires a top-down 32-bpp DIB.
+                biPlanes = 1,
+                biBitCount = 32,
+                biCompression = BiRgb,
+            },
+        };
+
+        var bitmap = CreateDIBSection(
+            targetDc, ref bitmapInfo, DibRgbColors, out var bits, IntPtr.Zero, 0);
+        if (bitmap == IntPtr.Zero || bits == IntPtr.Zero)
+        {
+            DeleteDC(memoryDc);
+            return;
+        }
+
+        var oldBitmap = SelectObject(memoryDc, bitmap);
+        var font = CreateFont(
+            -Scale(fontSizeDip, dpi),
+            0, 0, 0, weight,
+            false, false, false,
+            1, 0, 0, 4, 0,
+            fontFace);
+        var oldFont = font != IntPtr.Zero ? SelectObject(memoryDc, font) : IntPtr.Zero;
+        var theme = OpenThemeData(window, "CompositedWindow::Window");
+
+        try
+        {
+            // CreateDIBSection memory isn't guaranteed to be initialized. Zero means fully
+            // transparent black on the extended DWM frame.
+            Marshal.Copy(new byte[checked(width * height * 4)], 0, bits, checked(width * height * 4));
+
+            if (theme == IntPtr.Zero || font == IntPtr.Zero)
+            {
+                return;
+            }
+
+            var rect = new Rect
+            {
+                Left = 0,
+                Top = 0,
+                Right = width,
+                Bottom = height,
+            };
+            var options = new DttOpts
+            {
+                dwSize = (uint)Marshal.SizeOf<DttOpts>(),
+                dwFlags = DttComposited | DttTextColor,
+                crText = color,
+            };
+
+            if (DrawThemeTextEx(
+                    theme,
+                    memoryDc,
+                    0,
+                    0,
+                    text,
+                    -1,
+                    horizontalAlignment | DtVCenter | DtSingleLine,
+                    ref rect,
+                    ref options) >= 0)
+            {
+                BitBlt(targetDc, left, top, width, height, memoryDc, 0, 0, SrcCopy);
+            }
+        }
+        finally
+        {
+            if (theme != IntPtr.Zero)
+            {
+                CloseThemeData(theme);
+            }
+
+            if (font != IntPtr.Zero)
+            {
+                if (oldFont != IntPtr.Zero)
+                {
+                    SelectObject(memoryDc, oldFont);
+                }
+                DeleteObject(font);
+            }
+
+            if (oldBitmap != IntPtr.Zero)
+            {
+                SelectObject(memoryDc, oldBitmap);
+            }
+            DeleteObject(bitmap);
+            DeleteDC(memoryDc);
         }
     }
 
@@ -1536,9 +1741,7 @@ internal static class HardwareUiWindow
 
         // AccentPolicy can make DWM choose a brighter generic outline than the Shell flyout edge.
         // Set the edge explicitly in both themes; high contrast returns ownership to the system.
-        var borderColor = _highContrast
-            ? DwmColorDefault
-            : unchecked((int)(_isDarkTheme ? Rgb(38, 38, 44) : Rgb(234, 234, 234)));
+        var borderColor = _highContrast ? DwmColorDefault : DwmColorNone;
         DwmSetWindowAttribute(window, DwmwaBorderColor, ref borderColor, sizeof(int));
 
         // Clear the legacy accent policy first so theme changes cannot leave a stale dark tint.
@@ -1571,7 +1774,7 @@ internal static class HardwareUiWindow
             // only for dark mode to reproduce that layer while keeping the same DWM blur.
             var noBackdrop = DwmsbtNone;
             DwmSetWindowAttribute(window, DwmwaSystemBackdropType, ref noBackdrop, sizeof(int));
-            if (frameResult >= 0 && SetAcrylicAccentPolicy(window, enabled: true))
+            if (frameResult >= 0 && SetAcrylicAccentPolicy(window, enabled: true, gradientColor: DarkAcrylicGradientColor))
             {
                 _systemBackdropEnabled = true;
                 return;
@@ -1583,7 +1786,18 @@ internal static class HardwareUiWindow
             return;
         }
 
-        // Light mode intentionally keeps Windows' bright transient Acrylic.
+        // The transient backdrop is too opaque/flat for the native light hardware flyout on
+        // current Windows 11 builds. Use the same tint-capable native Acrylic path as dark mode,
+        // with the light Shell surface tint. Fall back to DWMSBT_TRANSIENTWINDOW if unavailable.
+        var noLightBackdrop = DwmsbtNone;
+        DwmSetWindowAttribute(window, DwmwaSystemBackdropType, ref noLightBackdrop, sizeof(int));
+        if (frameResult >= 0 &&
+            SetAcrylicAccentPolicy(window, enabled: true, gradientColor: LightAcrylicGradientColor))
+        {
+            _systemBackdropEnabled = true;
+            return;
+        }
+
         var backdropType = DwmsbtTransientWindow;
         var backdropResult = DwmSetWindowAttribute(
             window,
@@ -1593,13 +1807,13 @@ internal static class HardwareUiWindow
         _systemBackdropEnabled = backdropResult >= 0 && frameResult >= 0;
     }
 
-    private static bool SetAcrylicAccentPolicy(IntPtr window, bool enabled)
+    private static bool SetAcrylicAccentPolicy(IntPtr window, bool enabled, uint gradientColor = 0)
     {
         var policy = new AccentPolicy
         {
             AccentState = enabled ? AccentEnableAcrylicBlurBehind : AccentDisabled,
             AccentFlags = 0,
-            GradientColor = enabled ? DarkAcrylicGradientColor : 0,
+            GradientColor = enabled ? gradientColor : 0,
             AnimationId = 0,
         };
 
@@ -2040,6 +2254,33 @@ internal static class HardwareUiWindow
         uint pitchAndFamily,
         string faceName);
 
+    [DllImport("gdi32.dll")]
+    private static extern IntPtr CreateDIBSection(
+        IntPtr deviceContext,
+        ref BitmapInfo bitmapInfo,
+        uint usage,
+        out IntPtr bits,
+        IntPtr section,
+        uint offset);
+
+    [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr OpenThemeData(IntPtr window, string classList);
+
+    [DllImport("uxtheme.dll")]
+    private static extern int CloseThemeData(IntPtr theme);
+
+    [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
+    private static extern int DrawThemeTextEx(
+        IntPtr theme,
+        IntPtr deviceContext,
+        int partId,
+        int stateId,
+        string text,
+        int textLength,
+        uint textFlags,
+        ref Rect rect,
+        ref DttOpts options);
+
     [DllImport("user32.dll")]
     private static extern bool SetWindowCompositionAttribute(
         IntPtr window,
@@ -2097,6 +2338,58 @@ internal static class HardwareUiWindow
         BottomCenter = 1,
         TopLeft = 2,
         TopCenter = 3,
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BitmapInfoHeader
+    {
+        public uint biSize;
+        public int biWidth;
+        public int biHeight;
+        public ushort biPlanes;
+        public ushort biBitCount;
+        public uint biCompression;
+        public uint biSizeImage;
+        public int biXPelsPerMeter;
+        public int biYPelsPerMeter;
+        public uint biClrUsed;
+        public uint biClrImportant;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RgbQuad
+    {
+        public byte rgbBlue;
+        public byte rgbGreen;
+        public byte rgbRed;
+        public byte rgbReserved;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BitmapInfo
+    {
+        public BitmapInfoHeader bmiHeader;
+        public RgbQuad bmiColors;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DttOpts
+    {
+        public uint dwSize;
+        public uint dwFlags;
+        public uint crText;
+        public uint crBorder;
+        public uint crShadow;
+        public int iTextShadowType;
+        public Point ptShadowOffset;
+        public int iBorderSize;
+        public int iFontPropId;
+        public int iColorPropId;
+        public int iStateId;
+        [MarshalAs(UnmanagedType.Bool)] public bool fApplyOverlay;
+        public int iGlowSize;
+        public IntPtr pfnDrawTextCallback;
+        public IntPtr lParam;
     }
 
     [StructLayout(LayoutKind.Sequential)]
