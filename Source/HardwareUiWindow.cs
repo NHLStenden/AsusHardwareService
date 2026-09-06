@@ -55,10 +55,12 @@ internal static class HardwareUiWindow
 
     private const int DwmwaUseImmersiveDarkMode = 20;
     private const int DwmwaWindowCornerPreference = 33;
+    private const int DwmwaBorderColor = 34;
     private const int DwmwaSystemBackdropType = 38;
     private const int DwmwcpRound = 2;
     private const int DwmsbtNone = 1;
     private const int DwmsbtTransientWindow = 3;
+    private const int DwmColorDefault = unchecked((int)0xFFFFFFFF);
 
     private const int WcaAccentPolicy = 19;
     private const int AccentDisabled = 0;
@@ -93,6 +95,12 @@ internal static class HardwareUiWindow
     private const int PsSolid = 0;
     private const int NullBrush = 5;
     private const int NullPen = 8;
+    private const uint SrcCopy = 0x00CC0020;
+
+    // HKCU\...\Explorer\Accent\AccentPalette is eight 4-byte entries:
+    // Light3, Light2, Light1, Accent, Dark1, Dark2, Dark3, Extra.
+    private const int AccentPaletteLight2 = 1;
+    private const int AccentPaletteDark1 = 4;
 
     // WinUI's ControlFastAnimationDuration resource is 167 ms. Use it as the actual clock for
     // both directions rather than as a timeout around an independently-timed DWM transition.
@@ -135,6 +143,21 @@ internal static class HardwareUiWindow
     private static bool _showAnimationActive;
     private static bool _hideAnimationActive;
     private static bool _systemBackdropEnabled;
+
+    // Persistent Win32 back buffer. Rendering the complete flyout off-screen and committing it
+    // with one BitBlt prevents DWM from ever seeing the black Acrylic-clear pass and the GDI+
+    // progress capsule as two separate intermediate frames.
+    private static IntPtr _backBufferDc;
+    private static IntPtr _backBufferBitmap;
+    private static IntPtr _backBufferOldBitmap;
+    private static int _backBufferWidth;
+    private static int _backBufferHeight;
+
+    // GDI+ is process-global for our purposes. Starting/stopping it on every WM_PAINT adds work
+    // exactly on the rapid brightness/backlight update path, so keep one token for the HWND life.
+    private static bool _gdiPlusStartupAttempted;
+    private static bool _gdiPlusAvailable;
+    private static UIntPtr _gdiPlusToken;
     private static long _animationStartTimestamp;
     private static int _animationStartY;
     private static int _animationEndY;
@@ -371,6 +394,8 @@ internal static class HardwareUiWindow
                 return IntPtr.Zero;
 
             case WmDestroy:
+                DestroyBackBuffer();
+                ShutdownGdiPlus();
                 PostQuitMessage(0);
                 return IntPtr.Zero;
         }
@@ -682,20 +707,115 @@ internal static class HardwareUiWindow
 
     private static void PaintStatus(IntPtr window)
     {
-        var deviceContext = BeginPaint(window, out var paintStruct);
-        if (deviceContext == IntPtr.Zero)
+        var paintDc = BeginPaint(window, out var paintStruct);
+        if (paintDc == IntPtr.Zero)
         {
             return;
         }
 
         try
         {
-            DrawStatus(window, deviceContext);
+            if (!GetClientRect(window, out var clientRect))
+            {
+                return;
+            }
+
+            var width = clientRect.Right - clientRect.Left;
+            var height = clientRect.Bottom - clientRect.Top;
+            if (width <= 0 || height <= 0 || !EnsureBackBuffer(paintDc, width, height))
+            {
+                // Safe fallback: preserve the old direct-paint path if allocation ever fails.
+                DrawStatus(window, paintDc);
+                return;
+            }
+
+            // Draw the *entire* client into memory first. This is important for the extended
+            // DWM/Acrylic frame: FillStatusBackground deliberately writes black before the
+            // foreground. Direct painting lets the compositor occasionally sample that temporary
+            // state during rapid key repeats, which is perceived as a blinking progress bar.
+            DrawStatus(window, _backBufferDc);
+
+            // Present the finished surface atomically from GDI's point of view.
+            BitBlt(
+                paintDc,
+                0,
+                0,
+                width,
+                height,
+                _backBufferDc,
+                0,
+                0,
+                SrcCopy);
         }
         finally
         {
             EndPaint(window, ref paintStruct);
         }
+    }
+
+    private static bool EnsureBackBuffer(IntPtr targetDc, int width, int height)
+    {
+        if (_backBufferDc != IntPtr.Zero &&
+            _backBufferBitmap != IntPtr.Zero &&
+            _backBufferWidth == width &&
+            _backBufferHeight == height)
+        {
+            return true;
+        }
+
+        DestroyBackBuffer();
+
+        var memoryDc = CreateCompatibleDC(targetDc);
+        if (memoryDc == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        var bitmap = CreateCompatibleBitmap(targetDc, width, height);
+        if (bitmap == IntPtr.Zero)
+        {
+            DeleteDC(memoryDc);
+            return false;
+        }
+
+        var oldBitmap = SelectObject(memoryDc, bitmap);
+        if (oldBitmap == IntPtr.Zero || oldBitmap == new IntPtr(-1))
+        {
+            DeleteObject(bitmap);
+            DeleteDC(memoryDc);
+            return false;
+        }
+
+        _backBufferDc = memoryDc;
+        _backBufferBitmap = bitmap;
+        _backBufferOldBitmap = oldBitmap;
+        _backBufferWidth = width;
+        _backBufferHeight = height;
+        return true;
+    }
+
+    private static void DestroyBackBuffer()
+    {
+        if (_backBufferDc != IntPtr.Zero && _backBufferOldBitmap != IntPtr.Zero)
+        {
+            SelectObject(_backBufferDc, _backBufferOldBitmap);
+        }
+
+        if (_backBufferBitmap != IntPtr.Zero)
+        {
+            DeleteObject(_backBufferBitmap);
+        }
+
+        if (_backBufferDc != IntPtr.Zero)
+        {
+            DeleteDC(_backBufferDc);
+        }
+
+        _backBufferDc = IntPtr.Zero;
+        _backBufferBitmap = IntPtr.Zero;
+        _backBufferOldBitmap = IntPtr.Zero;
+        _backBufferWidth = 0;
+        _backBufferHeight = 0;
     }
 
     private static void DrawStatus(IntPtr window, IntPtr deviceContext)
@@ -765,20 +885,6 @@ internal static class HardwareUiWindow
         try
         {
             FillRect(deviceContext, ref clientRect, backgroundBrush);
-            if (!_highContrast)
-            {
-                // SurfaceStrokeColorFlyout is translucent in WinUI. Pre-blend it against the
-                // fallback fill because classic GDI pens do not carry an alpha channel.
-                var contourColor = _isDarkTheme ? Rgb(35, 35, 35) : Rgb(234, 234, 234);
-                DrawRoundRectOutline(
-                    deviceContext,
-                    0,
-                    0,
-                    clientRect.Right - 1,
-                    clientRect.Bottom - 1,
-                    Scale(16, _windowDpi), // RoundRect expects the corner ellipse diameter.
-                    contourColor);
-            }
         }
         finally
         {
@@ -817,20 +923,33 @@ internal static class HardwareUiWindow
     {
         var foreground = GetPrimaryTextColor();
         DrawKeyboardIcon(deviceContext, dpi, foreground);
-        DrawLevelTrack(deviceContext, dpi, Math.Clamp(level, 0, 3) / 3.0, rightPaddingDip: 40);
+        DrawLevelTrack(
+            deviceContext,
+            dpi,
+            Math.Clamp(level, 0, 3) / 3.0,
+            leftPaddingDip: 40,
+            rightPaddingDip: 40);
         DrawLevelValue(deviceContext, dpi, Math.Clamp(level, 0, 3).ToString());
     }
 
     private static void DrawKeyboardIcon(IntPtr deviceContext, uint dpi, uint color)
     {
-        DrawFluentIcon(deviceContext, dpi, KeyboardGlyph, color);
+        // The compact 192-DIP level template has a 40-DIP leading slot. Moving the window edges
+        // inward without moving the glyph on screen requires the icon box to be 4..36 rather
+        // than the 8..40 box used by the 48-DIP leading-slot templates.
+        DrawFluentIcon(deviceContext, dpi, KeyboardGlyph, color, 4, 36);
     }
 
     private static void DrawDisplayBrightnessStatus(IntPtr deviceContext, uint dpi, int brightness)
     {
         var foreground = GetPrimaryTextColor();
         DrawSunIcon(deviceContext, dpi, foreground);
-        DrawLevelTrack(deviceContext, dpi, Math.Clamp(brightness, 0, 100) / 100.0, rightPaddingDip: 16);
+        DrawLevelTrack(
+            deviceContext,
+            dpi,
+            Math.Clamp(brightness, 0, 100) / 100.0,
+            leftPaddingDip: 48,
+            rightPaddingDip: 16);
     }
 
     private static void DrawSunIcon(IntPtr deviceContext, uint dpi, uint color)
@@ -873,56 +992,60 @@ internal static class HardwareUiWindow
         IntPtr deviceContext,
         uint dpi,
         double progress,
+        int leftPaddingDip,
         int rightPaddingDip)
     {
         progress = Math.Clamp(progress, 0.0, 1.0);
         var trackColor = _highContrast
             ? GetSysColor(ColorWindowText)
             : _isDarkTheme
-                ? Rgb(160, 160, 160)
+                // With the extended Acrylic frame, classic GDI colours are composited by DWM.
+                // #747474 lands at ~#9D9DA1 in the captured dark flyout, matching the native
+                // StrongFillColorDefault track much more closely than the previous #A0A0A0.
+                ? Rgb(116, 116, 116)
                 : Rgb(138, 138, 138);
         var accentColor = GetAccentColor();
 
-        // Native hardware indicators place the level control 48 DIPs from the left edge.
-        // rightPaddingDip is 16 for the native brightness layout and 40 when a value slot is present.
-        var trackLeft = Scale(48, dpi);
+        // Brightness uses the 48-DIP leading slot. The compact level+value template is 192 DIPs
+        // wide and uses 40 + 112 + 40 DIPs; keeping these as logical values makes the relationship
+        // survive arbitrary per-monitor scaling instead of tuning physical pixels for one DPI.
+        var trackLeft = Scale(leftPaddingDip, dpi);
         var trackTop = Scale(22, dpi);
         var trackRight = _windowWidth - Scale(rightPaddingDip, dpi);
         var trackBottom = Scale(26, dpi);
-        DrawFilledRoundRect(
+        DrawFilledCapsule(
             deviceContext,
             trackLeft,
             trackTop,
             trackRight,
             trackBottom,
-            Scale(4, dpi),
             trackColor);
 
         var trackWidth = trackRight - trackLeft;
         var progressRight = trackLeft + (int)Math.Round(trackWidth * progress);
         if (progress > 0.0)
         {
-            DrawFilledRoundRect(
+            DrawFilledCapsule(
                 deviceContext,
                 trackLeft,
                 trackTop,
                 progressRight,
                 trackBottom,
-                Scale(4, dpi),
                 accentColor);
         }
     }
 
     private static void DrawLevelValue(IntPtr deviceContext, uint dpi, string value)
     {
+        var opticalOffset = ScaleHalfDip(3, dpi); // 1.5 DIPs; ~2 px at 125%, scales continuously.
         DrawTextCore(
             deviceContext,
             dpi,
             value,
             _windowWidth - Scale(40, dpi),
-            0,
+            -opticalOffset,
             _windowWidth,
-            _windowHeight - Scale(2, dpi),
+            _windowHeight - Scale(2, dpi) - opticalOffset,
             400,
             14,
             DtCenter);
@@ -932,7 +1055,7 @@ internal static class HardwareUiWindow
     {
         return kind switch
         {
-            HardwareUiNotificationKind.KeyboardBacklight => 200,
+            HardwareUiNotificationKind.KeyboardBacklight => 192,
             HardwareUiNotificationKind.DisplayBrightness => 176,
             HardwareUiNotificationKind.Microphone => 224,
             HardwareUiNotificationKind.PerformanceGpuMode => 236,
@@ -956,7 +1079,9 @@ internal static class HardwareUiWindow
         IntPtr deviceContext,
         uint dpi,
         string glyph,
-        uint color)
+        uint color,
+        int leftDip = 8,
+        int rightDip = 40)
     {
         var font = CreateFont(
             -Scale(14, dpi),
@@ -970,7 +1095,7 @@ internal static class HardwareUiWindow
             1,
             0,
             0,
-            5,
+            4, // ANTIALIASED_QUALITY: grayscale AA is stable on a DWM-composited/transparent client.
             0,
             "Segoe Fluent Icons");
         if (font == IntPtr.Zero)
@@ -984,9 +1109,9 @@ internal static class HardwareUiWindow
             SetTextColor(deviceContext, color);
             var iconRect = new Rect
             {
-                Left = Scale(8, dpi),
+                Left = Scale(leftDip, dpi),
                 Top = 0,
-                Right = Scale(40, dpi),
+                Right = Scale(rightDip, dpi),
                 Bottom = _windowHeight - Scale(1, dpi),
             };
             DrawText(
@@ -1027,7 +1152,7 @@ internal static class HardwareUiWindow
             1,
             0,
             0,
-            5,
+            4, // ANTIALIASED_QUALITY; avoid ClearType colour fringes over Acrylic.
             0,
             "Segoe UI Variable Text");
         if (font == IntPtr.Zero)
@@ -1084,6 +1209,121 @@ internal static class HardwareUiWindow
         }
     }
 
+    private static void DrawFilledCapsule(
+        IntPtr deviceContext,
+        int left,
+        int top,
+        int right,
+        int bottom,
+        uint color)
+    {
+        if (right <= left || bottom <= top || deviceContext == IntPtr.Zero)
+        {
+            return;
+        }
+
+        // GDI RoundRect is hard-edged at these sizes. GDI+ remains a very small native-only
+        // addition, but it is initialized once and draws into the off-screen buffer, so there is
+        // no partial-frame flash while brightness/backlight notifications arrive rapidly.
+        if (!EnsureGdiPlus())
+        {
+            DrawFilledRoundRect(
+                deviceContext, left, top, right, bottom, bottom - top, color);
+            return;
+        }
+
+        IntPtr graphics = IntPtr.Zero;
+        IntPtr brush = IntPtr.Zero;
+        try
+        {
+            if (GdipCreateFromHDC(deviceContext, out graphics) != 0 || graphics == IntPtr.Zero)
+            {
+                DrawFilledRoundRect(
+                    deviceContext, left, top, right, bottom, bottom - top, color);
+                return;
+            }
+
+            GdipSetSmoothingMode(graphics, 4); // SmoothingModeAntiAlias
+            if (GdipCreateSolidFill(ColorRefToArgb(color), out brush) != 0 || brush == IntPtr.Zero)
+            {
+                DrawFilledRoundRect(
+                    deviceContext, left, top, right, bottom, bottom - top, color);
+                return;
+            }
+
+            var height = bottom - top;
+            var width = right - left;
+            if (width <= height)
+            {
+                GdipFillEllipseI(graphics, brush, left, top, width, height);
+                return;
+            }
+
+            GdipFillEllipseI(graphics, brush, left, top, height, height);
+            GdipFillEllipseI(graphics, brush, right - height, top, height, height);
+            GdipFillRectangleI(
+                graphics,
+                brush,
+                left + (height / 2),
+                top,
+                width - height,
+                height);
+        }
+        finally
+        {
+            if (brush != IntPtr.Zero)
+            {
+                GdipDeleteBrush(brush);
+            }
+
+            if (graphics != IntPtr.Zero)
+            {
+                GdipDeleteGraphics(graphics);
+            }
+        }
+    }
+
+    private static bool EnsureGdiPlus()
+    {
+        if (_gdiPlusStartupAttempted)
+        {
+            return _gdiPlusAvailable;
+        }
+
+        _gdiPlusStartupAttempted = true;
+        var startupInput = new GdiplusStartupInput
+        {
+            GdiplusVersion = 1,
+            DebugEventCallback = IntPtr.Zero,
+            SuppressBackgroundThread = false,
+            SuppressExternalCodecs = true,
+        };
+
+        _gdiPlusAvailable =
+            GdiplusStartup(out _gdiPlusToken, ref startupInput, IntPtr.Zero) == 0;
+        return _gdiPlusAvailable;
+    }
+
+    private static void ShutdownGdiPlus()
+    {
+        if (_gdiPlusAvailable)
+        {
+            GdiplusShutdown(_gdiPlusToken);
+        }
+
+        _gdiPlusToken = UIntPtr.Zero;
+        _gdiPlusAvailable = false;
+        _gdiPlusStartupAttempted = false;
+    }
+
+    private static uint ColorRefToArgb(uint color)
+    {
+        var red = color & 0xffu;
+        var green = (color >> 8) & 0xffu;
+        var blue = (color >> 16) & 0xffu;
+        return 0xff000000u | (red << 16) | (green << 8) | blue;
+    }
+
     private static void DrawFilledRoundRect(
         IntPtr deviceContext,
         int left,
@@ -1135,10 +1375,12 @@ internal static class HardwareUiWindow
             return GetSysColor(ColorHighlight);
         }
 
-        // WinUI uses Light2 for normal accent fills in dark theme and Dark1 in light theme.
-        // Prefer the shell-generated palette so custom Windows accent colours keep the same contrast.
-        // The Explorer palette is best-effort; DWM/system highlight remains the supported fallback.
-        var accentShadeIndex = _isDarkTheme ? 1 : 4;
+        // Use the same semantic accent shades as WinUI's AccentFillColorDefaultBrush:
+        // dark theme -> SystemAccentColorLight2, light theme -> SystemAccentColorDark1.
+        // AccentPalette order is Light3, Light2, Light1, Accent, Dark1, Dark2, Dark3, Extra.
+        // Therefore the dark value is slot 1, not slot 2 (Light1). Light2 is the slightly
+        // aqua/cyan-tinted Windows 11 fill visible in the native hardware flyout.
+        var accentShadeIndex = _isDarkTheme ? AccentPaletteLight2 : AccentPaletteDark1;
         if (TryReadAccentPaletteColor(accentShadeIndex, out var themedAccent))
         {
             return themedAccent;
@@ -1291,6 +1533,13 @@ internal static class HardwareUiWindow
 
         var cornerPreference = DwmwcpRound;
         DwmSetWindowAttribute(window, DwmwaWindowCornerPreference, ref cornerPreference, sizeof(int));
+
+        // AccentPolicy can make DWM choose a brighter generic outline than the Shell flyout edge.
+        // Set the edge explicitly in both themes; high contrast returns ownership to the system.
+        var borderColor = _highContrast
+            ? DwmColorDefault
+            : unchecked((int)(_isDarkTheme ? Rgb(38, 38, 44) : Rgb(234, 234, 234)));
+        DwmSetWindowAttribute(window, DwmwaBorderColor, ref borderColor, sizeof(int));
 
         // Clear the legacy accent policy first so theme changes cannot leave a stale dark tint.
         SetAcrylicAccentPolicy(window, enabled: false);
@@ -1522,6 +1771,13 @@ internal static class HardwareUiWindow
         return (int)((value * dpi + 48) / 96);
     }
 
+    private static int ScaleHalfDip(int halfDipUnits, uint dpi)
+    {
+        // halfDipUnits is expressed in 0.5-DIP units. Keep optical nudges DPI-relative rather
+        // than baking in physical pixels (3 means 1.5 DIP).
+        return (int)(((long)halfDipUnits * dpi + 96) / 192);
+    }
+
     private static uint Rgb(byte red, byte green, byte blue)
     {
         return (uint)(red | (green << 8) | (blue << 16));
@@ -1728,6 +1984,27 @@ internal static class HardwareUiWindow
     private static extern bool DeleteObject(IntPtr graphicsObject);
 
     [DllImport("gdi32.dll")]
+    private static extern IntPtr CreateCompatibleDC(IntPtr deviceContext);
+
+    [DllImport("gdi32.dll")]
+    private static extern bool DeleteDC(IntPtr deviceContext);
+
+    [DllImport("gdi32.dll")]
+    private static extern IntPtr CreateCompatibleBitmap(IntPtr deviceContext, int width, int height);
+
+    [DllImport("gdi32.dll")]
+    private static extern bool BitBlt(
+        IntPtr destinationDc,
+        int x,
+        int y,
+        int width,
+        int height,
+        IntPtr sourceDc,
+        int sourceX,
+        int sourceY,
+        uint rasterOperation);
+
+    [DllImport("gdi32.dll")]
     private static extern IntPtr GetStockObject(int objectType);
 
     [DllImport("gdi32.dll")]
@@ -1768,6 +2045,38 @@ internal static class HardwareUiWindow
         IntPtr window,
         ref WindowCompositionAttribData data);
 
+    [DllImport("gdiplus.dll", ExactSpelling = true)]
+    private static extern int GdiplusStartup(
+        out UIntPtr token,
+        ref GdiplusStartupInput input,
+        IntPtr output);
+
+    [DllImport("gdiplus.dll", ExactSpelling = true)]
+    private static extern void GdiplusShutdown(UIntPtr token);
+
+    [DllImport("gdiplus.dll", ExactSpelling = true)]
+    private static extern int GdipCreateFromHDC(IntPtr deviceContext, out IntPtr graphics);
+
+    [DllImport("gdiplus.dll", ExactSpelling = true)]
+    private static extern int GdipDeleteGraphics(IntPtr graphics);
+
+    [DllImport("gdiplus.dll", ExactSpelling = true)]
+    private static extern int GdipSetSmoothingMode(IntPtr graphics, int smoothingMode);
+
+    [DllImport("gdiplus.dll", ExactSpelling = true)]
+    private static extern int GdipCreateSolidFill(uint color, out IntPtr brush);
+
+    [DllImport("gdiplus.dll", ExactSpelling = true)]
+    private static extern int GdipDeleteBrush(IntPtr brush);
+
+    [DllImport("gdiplus.dll", ExactSpelling = true)]
+    private static extern int GdipFillEllipseI(
+        IntPtr graphics, IntPtr brush, int x, int y, int width, int height);
+
+    [DllImport("gdiplus.dll", ExactSpelling = true)]
+    private static extern int GdipFillRectangleI(
+        IntPtr graphics, IntPtr brush, int x, int y, int width, int height);
+
     [DllImport("dwmapi.dll")]
     private static extern int DwmFlush();
 
@@ -1788,6 +2097,15 @@ internal static class HardwareUiWindow
         BottomCenter = 1,
         TopLeft = 2,
         TopCenter = 3,
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct GdiplusStartupInput
+    {
+        public uint GdiplusVersion;
+        public IntPtr DebugEventCallback;
+        [MarshalAs(UnmanagedType.Bool)] public bool SuppressBackgroundThread;
+        [MarshalAs(UnmanagedType.Bool)] public bool SuppressExternalCodecs;
     }
 
     [StructLayout(LayoutKind.Sequential)]
