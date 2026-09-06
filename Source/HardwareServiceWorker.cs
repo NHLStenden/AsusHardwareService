@@ -88,6 +88,7 @@ public sealed class HardwareServiceWorker : BackgroundService
         _stoppingToken = stoppingToken;
         _logger.LogInformation("Service started in Session 0.");
         _batteryChargeLimiter.ApplyChargeLimit();
+        _keyboardBacklightController.SetLevel(_options.CurrentValue.KeyboardBacklightLevel);
         _displayController.ApplyConfiguredServiceDisplaySettings();
         await ApplyConfiguredModesAsync(stoppingToken);
 

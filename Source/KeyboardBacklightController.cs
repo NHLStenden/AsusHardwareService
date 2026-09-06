@@ -128,7 +128,7 @@ public sealed class KeyboardBacklightController
         }
 
         return Math.Clamp(
-            _options.CurrentValue.KeyboardBacklightFallbackLevel,
+            _options.CurrentValue.KeyboardBacklightLevel,
             MinimumLevel,
             MaximumLevel);
     }

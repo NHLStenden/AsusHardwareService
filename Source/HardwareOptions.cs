@@ -48,12 +48,12 @@ public sealed class HardwareOptions
     public int BrightnessStep { get; set; } = 10;
 
     /// <summary>
-    /// Gets or sets the fallback keyboard backlight level used when the current hardware level cannot be read.
+    /// Gets or sets the fallback keyboard level.
     /// </summary>
     /// <remarks>
-    /// ASUS keyboard backlight levels range from <c>0</c> (off) to <c>3</c> (maximum).
+    /// Keyboard backlight levels range from <c>0</c> (off) to <c>3</c> (maximum).
     /// </remarks>
-    public int KeyboardBacklightFallbackLevel { get; set; } = 1;
+    public int KeyboardBacklightLevel { get; set; } = 2;
 
     /// <summary>
     /// Gets or sets the delay, in milliseconds, before retrying ASUS HID device discovery after a failure.
