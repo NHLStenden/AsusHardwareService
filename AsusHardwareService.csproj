@@ -15,4 +15,7 @@
     <PackageReference Include="System.Management" Version="10.0.5" />
     <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.5" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="appsettings.json" Link="appsettings.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>
