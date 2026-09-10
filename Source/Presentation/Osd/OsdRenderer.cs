@@ -12,6 +12,7 @@ internal static class OsdRenderer
     private static IntPtr _backBufferDc;
     private static IntPtr _backBufferBitmap;
     private static IntPtr _backBufferOldBitmap;
+    private static IntPtr _backBufferBits;
     private static int _backBufferWidth;
     private static int _backBufferHeight;
 
@@ -39,8 +40,12 @@ internal static class OsdRenderer
             var height = clientRect.Bottom - clientRect.Top;
             if (width <= 0 || height <= 0 || !EnsureBackBuffer(paintDc, width, height))
             {
-                // Safe fallback: preserve the old direct-paint path if allocation ever fails.
+                // Safe fallback: preserve direct painting if DIB allocation ever fails.
                 DrawStatus(window, paintDc);
+                if (!OsdTheme.HighContrast)
+                {
+                    DrawForegroundComposited(window, paintDc);
+                }
                 return;
             }
 
@@ -62,12 +67,12 @@ internal static class OsdRenderer
                 0,
                 SrcCopy);
 
-            // GDI dark text on an extended glass frame is interpreted as transparent pixels.
-            // Repaint the light-theme foreground with DrawThemeTextEx(DTT_COMPOSITED), which
-            // writes the alpha channel DWM expects for dark glyphs/text on glass.
-            if (!OsdTheme.IsDarkTheme && !OsdTheme.HighContrast)
+            // Draw all non-high-contrast glyphs/text through the same DTT_COMPOSITED path.
+            // DTT_COMPOSITED is the documented UxTheme mechanism for antialiased alpha text on
+            // glass and avoids dark/light rasterization differences in the previous code.
+            if (!OsdTheme.HighContrast)
             {
-                DrawLightForegroundComposited(window, paintDc);
+                DrawForegroundComposited(window, paintDc);
             }
         }
         finally
@@ -80,6 +85,7 @@ internal static class OsdRenderer
     {
         if (_backBufferDc != IntPtr.Zero &&
             _backBufferBitmap != IntPtr.Zero &&
+            _backBufferBits != IntPtr.Zero &&
             _backBufferWidth == width &&
             _backBufferHeight == height)
         {
@@ -94,9 +100,27 @@ internal static class OsdRenderer
             return false;
         }
 
-        var bitmap = CreateCompatibleBitmap(targetDc, width, height);
-        if (bitmap == IntPtr.Zero)
+        var bitmapInfo = new BitmapInfo
         {
+            bmiHeader = new BitmapInfoHeader
+            {
+                biSize = (uint)Marshal.SizeOf<BitmapInfoHeader>(),
+                biWidth = width,
+                biHeight = -height, // top-down BGRA DIB; required for reliable per-pixel alpha.
+                biPlanes = 1,
+                biBitCount = 32,
+                biCompression = BiRgb,
+            },
+        };
+
+        var bitmap = CreateDIBSection(
+            targetDc, ref bitmapInfo, DibRgbColors, out var bits, IntPtr.Zero, 0);
+        if (bitmap == IntPtr.Zero || bits == IntPtr.Zero)
+        {
+            if (bitmap != IntPtr.Zero)
+            {
+                DeleteObject(bitmap);
+            }
             DeleteDC(memoryDc);
             return false;
         }
@@ -112,6 +136,7 @@ internal static class OsdRenderer
         _backBufferDc = memoryDc;
         _backBufferBitmap = bitmap;
         _backBufferOldBitmap = oldBitmap;
+        _backBufferBits = bits;
         _backBufferWidth = width;
         _backBufferHeight = height;
         return true;
@@ -137,8 +162,18 @@ internal static class OsdRenderer
         _backBufferDc = IntPtr.Zero;
         _backBufferBitmap = IntPtr.Zero;
         _backBufferOldBitmap = IntPtr.Zero;
+        _backBufferBits = IntPtr.Zero;
         _backBufferWidth = 0;
         _backBufferHeight = 0;
+    }
+
+    internal static void DrawStatusForPrint(IntPtr window, IntPtr deviceContext)
+    {
+        DrawStatus(window, deviceContext);
+        if (!OsdTheme.HighContrast)
+        {
+            DrawForegroundComposited(window, deviceContext);
+        }
     }
 
     internal static void DrawStatus(IntPtr window, IntPtr deviceContext)
@@ -154,7 +189,14 @@ internal static class OsdRenderer
             dpi = OsdHost.WindowDpi == 0 ? 96u : OsdHost.WindowDpi;
         }
 
-        FillStatusBackground(deviceContext, ref clientRect);
+        if (deviceContext == _backBufferDc && _backBufferBits != IntPtr.Zero)
+        {
+            PrepareBackBuffer();
+        }
+        else
+        {
+            FillStatusBackground(deviceContext, ref clientRect);
+        }
         SetBkMode(deviceContext, Transparent);
 
         switch (OsdHost.Notification.Kind)
@@ -176,6 +218,25 @@ internal static class OsdRenderer
                 DrawMicrophoneStatus(deviceContext, dpi, OsdHost.Notification.Value != 0);
                 break;
         }
+    }
+
+    private static void PrepareBackBuffer()
+    {
+        if (_backBufferBits == IntPtr.Zero || _backBufferWidth <= 0 || _backBufferHeight <= 0)
+        {
+            return;
+        }
+
+        var argb = OsdTheme.SystemBackdropEnabled
+            ? 0x00000000u
+            : OsdTheme.GetFallbackSurfaceArgb();
+        var pixelCount = checked(_backBufferWidth * _backBufferHeight);
+        var pixels = new int[pixelCount];
+        if (argb != 0)
+        {
+            Array.Fill(pixels, unchecked((int)argb));
+        }
+        Marshal.Copy(pixels, 0, _backBufferBits, pixelCount);
     }
 
     private static void FillStatusBackground(IntPtr deviceContext, ref Rect clientRect)
@@ -217,155 +278,130 @@ internal static class OsdRenderer
 
     private static void DrawMicrophoneStatus(IntPtr deviceContext, uint dpi, bool muted)
     {
+        var layout = OsdLayout.Get(OnScreenDisplayNotificationKind.Microphone);
         var foreground = OsdTheme.GetPrimaryTextColor();
-        DrawMicrophoneIcon(deviceContext, dpi, foreground, muted);
-        DrawPrimaryText(
-            deviceContext,
-            dpi,
-            muted ? "Microphone muted" : "Microphone unmuted",
-            Scale(48, dpi),
-            0,
-            OsdHost.WindowWidth - Scale(16, dpi),
-            OsdHost.WindowHeight);
-    }
-
-    private static void DrawMicrophoneIcon(
-        IntPtr deviceContext,
-        uint dpi,
-        uint color,
-        bool muted)
-    {
         DrawFluentIcon(
             deviceContext,
             dpi,
             muted ? MicrophoneOffGlyph : MicrophoneOnGlyph,
-            color);
+            foreground,
+            layout.IconRect);
+
+        if (layout.TextRect is { } textRect)
+        {
+            DrawPrimaryText(
+                deviceContext,
+                dpi,
+                muted ? "Microphone muted" : "Microphone unmuted",
+                textRect);
+        }
     }
 
     private static void DrawKeyboardBacklightStatus(IntPtr deviceContext, uint dpi, int level)
     {
+        var layout = OsdLayout.Get(OnScreenDisplayNotificationKind.KeyboardBacklight);
         var foreground = OsdTheme.GetPrimaryTextColor();
-        DrawKeyboardIcon(deviceContext, dpi, foreground);
-        DrawLevelTrack(
-            deviceContext,
-            dpi,
-            Math.Clamp(level, 0, 3) / 3.0,
-            leftPaddingDip: 42,
-            rightPaddingDip: 40);
-        DrawLevelValue(deviceContext, dpi, Math.Clamp(level, 0, 3).ToString());
-    }
+        DrawFluentIcon(deviceContext, dpi, KeyboardGlyph, foreground, layout.IconRect);
 
-    private static void DrawKeyboardIcon(IntPtr deviceContext, uint dpi, uint color)
-    {
-        // The compact 192-DIP level template has a 40-DIP leading slot. Moving the window edges
-        // inward without moving the glyph on screen requires the icon box to be 4..36 rather
-        // than the 8..40 box used by the 48-DIP leading-slot templates.
-        DrawFluentIcon(deviceContext, dpi, KeyboardGlyph, color, 2, 34);
+        if (layout.LevelTrackRect is { } trackRect)
+        {
+            DrawLevelTrack(
+                deviceContext,
+                dpi,
+                Math.Clamp(level, 0, 3) / 3.0,
+                trackRect);
+        }
+
+        if (layout.ValueRect is { } valueRect)
+        {
+            DrawLevelValue(deviceContext, dpi, Math.Clamp(level, 0, 3).ToString(), valueRect);
+        }
     }
 
     private static void DrawDisplayBrightnessStatus(IntPtr deviceContext, uint dpi, int brightness)
     {
+        var layout = OsdLayout.Get(OnScreenDisplayNotificationKind.DisplayBrightness);
         var foreground = OsdTheme.GetPrimaryTextColor();
-        DrawSunIcon(deviceContext, dpi, foreground);
-        DrawLevelTrack(
-            deviceContext,
-            dpi,
-            Math.Clamp(brightness, 0, 100) / 100.0,
-            leftPaddingDip: 48,
-            rightPaddingDip: 16);
-    }
+        DrawFluentIcon(deviceContext, dpi, BrightnessGlyph, foreground, layout.IconRect);
 
-    private static void DrawSunIcon(IntPtr deviceContext, uint dpi, uint color)
-    {
-        DrawFluentIcon(deviceContext, dpi, BrightnessGlyph, color);
+        if (layout.LevelTrackRect is { } trackRect)
+        {
+            DrawLevelTrack(
+                deviceContext,
+                dpi,
+                Math.Clamp(brightness, 0, 100) / 100.0,
+                trackRect);
+        }
     }
 
     private static void DrawPerformanceGpuStatus(IntPtr deviceContext, uint dpi, int modeValue)
     {
+        var layout = OsdLayout.Get(OnScreenDisplayNotificationKind.PerformanceGpuMode);
         var foreground = OsdTheme.GetPrimaryTextColor();
         var silent = (modeValue & 1) != 0;
-        DrawPerformanceIcon(deviceContext, dpi, foreground, silent);
-
-        var performanceMode = silent ? "Silent" : "Performance";
-        var gpuMode = (modeValue & 2) != 0 ? "Eco" : "Standard";
-        DrawPrimaryText(
-            deviceContext,
-            dpi,
-            $"{performanceMode} · {gpuMode}",
-            Scale(48, dpi),
-            0,
-            OsdHost.WindowWidth - Scale(16, dpi),
-            OsdHost.WindowHeight);
-    }
-
-    private static void DrawPerformanceIcon(
-        IntPtr deviceContext,
-        uint dpi,
-        uint color,
-        bool silent)
-    {
         DrawFluentIcon(
             deviceContext,
             dpi,
             silent ? SpeedMediumGlyph : SpeedHighGlyph,
-            color);
+            foreground,
+            layout.IconRect);
+
+        var performanceMode = silent ? "Silent" : "Performance";
+        var gpuMode = (modeValue & 2) != 0 ? "Eco" : "Standard";
+        if (layout.TextRect is { } textRect)
+        {
+            DrawPrimaryText(
+                deviceContext,
+                dpi,
+                $"{performanceMode} · {gpuMode}",
+                textRect);
+        }
     }
 
     private static void DrawLevelTrack(
         IntPtr deviceContext,
         uint dpi,
         double progress,
-        int leftPaddingDip,
-        int rightPaddingDip)
+        DipRect trackRectDip)
     {
         progress = Math.Clamp(progress, 0.0, 1.0);
-        var trackColor = OsdTheme.HighContrast
-            ? GetSysColor(ColorWindowText)
-            : OsdTheme.IsDarkTheme
-                ? Rgb(160, 160, 160)
-                : Rgb(124, 124, 124);
-        var accentColor = OsdTheme.GetAccentColor();
+        var trackArgb = OsdTheme.GetLevelTrackArgb();
+        var accentArgb = OsdTheme.GetAccentArgb();
+        var track = OsdLayout.ToPixels(trackRectDip, dpi);
 
-        // Brightness uses the 48-DIP leading slot. The compact level+value template is 192 DIPs
-        // wide and uses 40 + 112 + 40 DIPs; keeping these as logical values makes the relationship
-        // survive arbitrary per-monitor scaling instead of tuning physical pixels for one DPI.
-        var trackLeft = Scale(leftPaddingDip, dpi);
-        var trackTop = Scale(20, dpi);
-        var trackRight = OsdHost.WindowWidth - Scale(rightPaddingDip, dpi);
-        var trackBottom = Scale(24, dpi);
         DrawFilledCapsule(
             deviceContext,
-            trackLeft,
-            trackTop,
-            trackRight,
-            trackBottom,
-            trackColor);
+            track.Left,
+            track.Top,
+            track.Right,
+            track.Bottom,
+            trackArgb);
 
-        var trackWidth = trackRight - trackLeft;
-        var progressRight = trackLeft + (int)Math.Round(trackWidth * progress);
+        var trackWidth = track.Right - track.Left;
+        var progressRight = track.Left + (int)Math.Round(trackWidth * progress);
         if (progress > 0.0)
         {
             DrawFilledCapsule(
                 deviceContext,
-                trackLeft,
-                trackTop,
+                track.Left,
+                track.Top,
                 progressRight,
-                trackBottom,
-                accentColor);
+                track.Bottom,
+                accentArgb);
         }
     }
 
-    private static void DrawLevelValue(IntPtr deviceContext, uint dpi, string value)
+    private static void DrawLevelValue(IntPtr deviceContext, uint dpi, string value, DipRect rectDip)
     {
-        var opticalOffset = ScaleHalfDip(4, dpi); // 2 DIPs; 3 px at 125%.
+        var rect = OsdLayout.ToPixels(rectDip, dpi);
         DrawTextCore(
             deviceContext,
             dpi,
             value,
-            OsdHost.WindowWidth - Scale(40, dpi),
-            -opticalOffset,
-            OsdHost.WindowWidth,
-            OsdHost.WindowHeight - Scale(2, dpi) - opticalOffset,
+            rect.Left,
+            rect.Top,
+            rect.Right,
+            rect.Bottom,
             400,
             14,
             DtCenter);
@@ -375,12 +411,19 @@ internal static class OsdRenderer
         IntPtr deviceContext,
         uint dpi,
         string text,
-        int left,
-        int top,
-        int right,
-        int bottom)
+        DipRect rectDip)
     {
-        DrawTextCore(deviceContext, dpi, text, left, top, right, bottom, 400, 14);
+        var rect = OsdLayout.ToPixels(rectDip, dpi);
+        DrawTextCore(
+            deviceContext,
+            dpi,
+            text,
+            rect.Left,
+            rect.Top,
+            rect.Right,
+            rect.Bottom,
+            400,
+            14);
     }
 
     private static void DrawFluentIcon(
@@ -388,13 +431,15 @@ internal static class OsdRenderer
         uint dpi,
         string glyph,
         uint color,
-        int leftDip = 8,
-        int rightDip = 40)
+        DipRect rectDip)
     {
-        if (!OsdTheme.IsDarkTheme && !OsdTheme.HighContrast)
+        // Normal themes use one common DTT_COMPOSITED foreground path after the back buffer is
+        // presented. High contrast deliberately remains ordinary GDI on its opaque system surface.
+        if (!OsdTheme.HighContrast)
         {
             return;
         }
+
         var font = CreateFont(
             -Scale(14, dpi),
             0,
@@ -407,7 +452,7 @@ internal static class OsdRenderer
             1,
             0,
             0,
-            4, // ANTIALIASED_QUALITY: grayscale AA is stable on a DWM-composited/transparent client.
+            4,
             0,
             "Segoe Fluent Icons");
         if (font == IntPtr.Zero)
@@ -419,12 +464,13 @@ internal static class OsdRenderer
         try
         {
             SetTextColor(deviceContext, color);
+            var pixelRect = OsdLayout.ToPixels(rectDip, dpi);
             var iconRect = new Rect
             {
-                Left = Scale(leftDip, dpi),
-                Top = 0,
-                Right = Scale(rightDip, dpi),
-                Bottom = OsdHost.WindowHeight - Scale(1, dpi),
+                Left = pixelRect.Left,
+                Top = pixelRect.Top,
+                Right = pixelRect.Right,
+                Bottom = pixelRect.Bottom,
             };
             DrawText(
                 deviceContext,
@@ -452,7 +498,7 @@ internal static class OsdRenderer
         int fontSizeDip,
         uint horizontalAlignment = DtLeft)
     {
-        if (!OsdTheme.IsDarkTheme && !OsdTheme.HighContrast)
+        if (!OsdTheme.HighContrast)
         {
             return;
         }
@@ -496,7 +542,7 @@ internal static class OsdRenderer
         }
     }
 
-    private static void DrawLightForegroundComposited(IntPtr window, IntPtr deviceContext)
+    private static void DrawForegroundComposited(IntPtr window, IntPtr deviceContext)
     {
         var dpi = GetDpiForWindow(window);
         if (dpi == 0)
@@ -504,27 +550,34 @@ internal static class OsdRenderer
             dpi = OsdHost.WindowDpi == 0 ? 96u : OsdHost.WindowDpi;
         }
 
+        var kind = OsdHost.Notification.Kind;
+        var layout = OsdLayout.Get(kind);
         var color = OsdTheme.GetPrimaryTextColor();
-        switch (OsdHost.Notification.Kind)
+        var iconRect = OsdLayout.ToPixels(layout.IconRect, dpi);
+
+        switch (kind)
         {
             case OnScreenDisplayNotificationKind.KeyboardBacklight:
                 DrawCompositedTextOnGlass(
                     window, deviceContext, dpi, KeyboardGlyph,
-                    Scale(2, dpi), 0, Scale(34, dpi), OsdHost.WindowHeight - Scale(1, dpi),
+                    iconRect.Left, iconRect.Top, iconRect.Right, iconRect.Bottom,
                     "Segoe Fluent Icons", 14, 400, DtCenter, color);
 
-                var opticalOffset = ScaleHalfDip(4, dpi);
-                DrawCompositedTextOnGlass(
-                    window, deviceContext, dpi, Math.Clamp(OsdHost.Notification.Value, 0, 3).ToString(),
-                    OsdHost.WindowWidth - Scale(40, dpi), -opticalOffset,
-                    OsdHost.WindowWidth, OsdHost.WindowHeight - Scale(2, dpi) - opticalOffset,
-                    "Segoe UI Variable Text", 14, 400, DtCenter, color);
+                if (layout.ValueRect is { } valueRectDip)
+                {
+                    var valueRect = OsdLayout.ToPixels(valueRectDip, dpi);
+                    DrawCompositedTextOnGlass(
+                        window, deviceContext, dpi,
+                        Math.Clamp(OsdHost.Notification.Value, 0, 3).ToString(),
+                        valueRect.Left, valueRect.Top, valueRect.Right, valueRect.Bottom,
+                        "Segoe UI Variable Text", 14, 400, DtCenter, color);
+                }
                 break;
 
             case OnScreenDisplayNotificationKind.DisplayBrightness:
                 DrawCompositedTextOnGlass(
                     window, deviceContext, dpi, BrightnessGlyph,
-                    Scale(8, dpi), 0, Scale(40, dpi), OsdHost.WindowHeight - Scale(1, dpi),
+                    iconRect.Left, iconRect.Top, iconRect.Right, iconRect.Bottom,
                     "Segoe Fluent Icons", 14, 400, DtCenter, color);
                 break;
 
@@ -532,15 +585,19 @@ internal static class OsdRenderer
                 var silent = (OsdHost.Notification.Value & 1) != 0;
                 DrawCompositedTextOnGlass(
                     window, deviceContext, dpi, silent ? SpeedMediumGlyph : SpeedHighGlyph,
-                    Scale(8, dpi), 0, Scale(40, dpi), OsdHost.WindowHeight - Scale(1, dpi),
+                    iconRect.Left, iconRect.Top, iconRect.Right, iconRect.Bottom,
                     "Segoe Fluent Icons", 14, 400, DtCenter, color);
 
                 var performanceMode = silent ? "Silent" : "Performance";
                 var gpuMode = (OsdHost.Notification.Value & 2) != 0 ? "Eco" : "Standard";
-                DrawCompositedTextOnGlass(
-                    window, deviceContext, dpi, $"{performanceMode} · {gpuMode}",
-                    Scale(48, dpi), 0, OsdHost.WindowWidth - Scale(16, dpi), OsdHost.WindowHeight,
-                    "Segoe UI Variable Text", 14, 400, DtLeft, color);
+                if (layout.TextRect is { } performanceTextRectDip)
+                {
+                    var textRect = OsdLayout.ToPixels(performanceTextRectDip, dpi);
+                    DrawCompositedTextOnGlass(
+                        window, deviceContext, dpi, $"{performanceMode} · {gpuMode}",
+                        textRect.Left, textRect.Top, textRect.Right, textRect.Bottom,
+                        "Segoe UI Variable Text", 14, 400, DtLeft, color);
+                }
                 break;
 
             case OnScreenDisplayNotificationKind.Microphone:
@@ -548,13 +605,18 @@ internal static class OsdRenderer
                 var muted = OsdHost.Notification.Value != 0;
                 DrawCompositedTextOnGlass(
                     window, deviceContext, dpi, muted ? MicrophoneOffGlyph : MicrophoneOnGlyph,
-                    Scale(8, dpi), 0, Scale(40, dpi), OsdHost.WindowHeight - Scale(1, dpi),
+                    iconRect.Left, iconRect.Top, iconRect.Right, iconRect.Bottom,
                     "Segoe Fluent Icons", 14, 400, DtCenter, color);
-                DrawCompositedTextOnGlass(
-                    window, deviceContext, dpi,
-                    muted ? "Microphone muted" : "Microphone unmuted",
-                    Scale(48, dpi), 0, OsdHost.WindowWidth - Scale(16, dpi), OsdHost.WindowHeight,
-                    "Segoe UI Variable Text", 14, 400, DtLeft, color);
+
+                if (layout.TextRect is { } microphoneTextRectDip)
+                {
+                    var textRect = OsdLayout.ToPixels(microphoneTextRectDip, dpi);
+                    DrawCompositedTextOnGlass(
+                        window, deviceContext, dpi,
+                        muted ? "Microphone muted" : "Microphone unmuted",
+                        textRect.Left, textRect.Top, textRect.Right, textRect.Bottom,
+                        "Segoe UI Variable Text", 14, 400, DtLeft, color);
+                }
                 break;
         }
     }
@@ -620,9 +682,19 @@ internal static class OsdRenderer
 
         try
         {
-            // CreateDIBSection memory isn't guaranteed to be initialized. Zero means fully
-            // transparent black on the extended DWM frame.
-            Marshal.Copy(new byte[checked(width * height * 4)], 0, bits, checked(width * height * 4));
+            // CreateDIBSection memory isn't guaranteed to be initialized. Acrylic uses fully
+            // transparent black; the accessibility/transparency-off fallback uses the opaque
+            // WinUI solid fallback so SRCCOPY does not punch a transparent rectangle around text.
+            var pixelCount = checked(width * height);
+            var initialArgb = OsdTheme.SystemBackdropEnabled
+                ? 0u
+                : OsdTheme.GetFallbackSurfaceArgb();
+            var initialPixels = new int[pixelCount];
+            if (initialArgb != 0)
+            {
+                Array.Fill(initialPixels, unchecked((int)initialArgb));
+            }
+            Marshal.Copy(initialPixels, 0, bits, pixelCount);
 
             if (theme == IntPtr.Zero || font == IntPtr.Zero)
             {
@@ -717,20 +789,34 @@ internal static class OsdRenderer
         int top,
         int right,
         int bottom,
-        uint color)
+        uint argb)
     {
         if (right <= left || bottom <= top || deviceContext == IntPtr.Zero)
         {
             return;
         }
 
-        // GDI RoundRect is hard-edged at these sizes. GDI+ remains a very small native-only
-        // addition, but it is initialized once and draws into the off-screen buffer, so there is
-        // no partial-frame flash while brightness/backlight notifications arrive rapidly.
+        // The persistent top-down DIB is the important path. Draw the capsule ourselves so the
+        // WinUI semantic brush alpha survives all the way to DWM instead of being flattened by
+        // COLORREF/GDI. The old opaque track could never reproduce ControlStrongStrokeColorDefault.
+        if (deviceContext == _backBufferDc && _backBufferBits != IntPtr.Zero)
+        {
+            DrawArgbCapsuleIntoBackBuffer(left, top, right, bottom, argb);
+            return;
+        }
+
+        // Allocation-failure/WM_PRINTCLIENT fallback. GDI+ understands ARGB; if it is unavailable,
+        // flatten the semantic color over the solid fallback surface rather than discarding alpha.
         if (!EnsureGdiPlus())
         {
             DrawFilledRoundRect(
-                deviceContext, left, top, right, bottom, bottom - top, color);
+                deviceContext,
+                left,
+                top,
+                right,
+                bottom,
+                bottom - top,
+                OsdTheme.CompositeArgbOverFallbackToColorRef(argb));
             return;
         }
 
@@ -741,15 +827,27 @@ internal static class OsdRenderer
             if (GdipCreateFromHDC(deviceContext, out graphics) != 0 || graphics == IntPtr.Zero)
             {
                 DrawFilledRoundRect(
-                    deviceContext, left, top, right, bottom, bottom - top, color);
+                    deviceContext,
+                    left,
+                    top,
+                    right,
+                    bottom,
+                    bottom - top,
+                    OsdTheme.CompositeArgbOverFallbackToColorRef(argb));
                 return;
             }
 
             GdipSetSmoothingMode(graphics, 4); // SmoothingModeAntiAlias
-            if (GdipCreateSolidFill(ColorRefToArgb(color), out brush) != 0 || brush == IntPtr.Zero)
+            if (GdipCreateSolidFill(argb, out brush) != 0 || brush == IntPtr.Zero)
             {
                 DrawFilledRoundRect(
-                    deviceContext, left, top, right, bottom, bottom - top, color);
+                    deviceContext,
+                    left,
+                    top,
+                    right,
+                    bottom,
+                    bottom - top,
+                    OsdTheme.CompositeArgbOverFallbackToColorRef(argb));
                 return;
             }
 
@@ -785,6 +883,138 @@ internal static class OsdRenderer
         }
     }
 
+    private static void DrawArgbCapsuleIntoBackBuffer(
+        int left,
+        int top,
+        int right,
+        int bottom,
+        uint argb)
+    {
+        var clippedLeft = Math.Clamp(left - 1, 0, _backBufferWidth);
+        var clippedTop = Math.Clamp(top - 1, 0, _backBufferHeight);
+        var clippedRight = Math.Clamp(right + 1, 0, _backBufferWidth);
+        var clippedBottom = Math.Clamp(bottom + 1, 0, _backBufferHeight);
+        if (clippedRight <= clippedLeft || clippedBottom <= clippedTop)
+        {
+            return;
+        }
+
+        var pixelCount = checked(_backBufferWidth * _backBufferHeight);
+        var pixels = new int[pixelCount];
+        Marshal.Copy(_backBufferBits, pixels, 0, pixelCount);
+
+        const int sampleGrid = 4;
+        const int sampleCount = sampleGrid * sampleGrid;
+        for (var y = clippedTop; y < clippedBottom; y++)
+        {
+            for (var x = clippedLeft; x < clippedRight; x++)
+            {
+                var insideSamples = 0;
+                for (var sy = 0; sy < sampleGrid; sy++)
+                {
+                    for (var sx = 0; sx < sampleGrid; sx++)
+                    {
+                        var sampleX = x + ((sx + 0.5) / sampleGrid);
+                        var sampleY = y + ((sy + 0.5) / sampleGrid);
+                        if (PointInsideCapsule(sampleX, sampleY, left, top, right, bottom))
+                        {
+                            insideSamples++;
+                        }
+                    }
+                }
+
+                if (insideSamples == 0)
+                {
+                    continue;
+                }
+
+                var coverage = (insideSamples * 255 + (sampleCount / 2)) / sampleCount;
+                var index = (y * _backBufferWidth) + x;
+                pixels[index] = BlendPremultipliedArgb(
+                    unchecked((uint)pixels[index]),
+                    argb,
+                    coverage);
+            }
+        }
+
+        Marshal.Copy(pixels, 0, _backBufferBits, pixelCount);
+    }
+
+    private static bool PointInsideCapsule(
+        double x,
+        double y,
+        int left,
+        int top,
+        int right,
+        int bottom)
+    {
+        if (x < left || x >= right || y < top || y >= bottom)
+        {
+            return false;
+        }
+
+        var width = right - left;
+        var height = bottom - top;
+        if (width <= height)
+        {
+            var radiusX = width / 2.0;
+            var radiusY = height / 2.0;
+            var centerX = (left + right) / 2.0;
+            var centerY = (top + bottom) / 2.0;
+            var nx = (x - centerX) / radiusX;
+            var ny = (y - centerY) / radiusY;
+            return (nx * nx) + (ny * ny) <= 1.0;
+        }
+
+        var radius = height / 2.0;
+        var centerYCapsule = (top + bottom) / 2.0;
+        var leftCenterX = left + radius;
+        var rightCenterX = right - radius;
+        if (x >= leftCenterX && x <= rightCenterX)
+        {
+            return true;
+        }
+
+        var centerXCircle = x < leftCenterX ? leftCenterX : rightCenterX;
+        var dx = x - centerXCircle;
+        var dy = y - centerYCapsule;
+        return (dx * dx) + (dy * dy) <= radius * radius;
+    }
+
+    private static int BlendPremultipliedArgb(uint destination, uint source, int coverage)
+    {
+        var sourceAlpha = (int)((source >> 24) & 0xffu);
+        sourceAlpha = (sourceAlpha * coverage + 127) / 255;
+        if (sourceAlpha <= 0)
+        {
+            return unchecked((int)destination);
+        }
+
+        var inverseAlpha = 255 - sourceAlpha;
+        var destinationAlpha = (int)((destination >> 24) & 0xffu);
+        var destinationRed = (int)((destination >> 16) & 0xffu);
+        var destinationGreen = (int)((destination >> 8) & 0xffu);
+        var destinationBlue = (int)(destination & 0xffu);
+
+        var sourceRed = (int)((source >> 16) & 0xffu);
+        var sourceGreen = (int)((source >> 8) & 0xffu);
+        var sourceBlue = (int)(source & 0xffu);
+
+        var outAlpha = sourceAlpha + ((destinationAlpha * inverseAlpha + 127) / 255);
+        var outRed = ((sourceRed * sourceAlpha + 127) / 255) +
+            ((destinationRed * inverseAlpha + 127) / 255);
+        var outGreen = ((sourceGreen * sourceAlpha + 127) / 255) +
+            ((destinationGreen * inverseAlpha + 127) / 255);
+        var outBlue = ((sourceBlue * sourceAlpha + 127) / 255) +
+            ((destinationBlue * inverseAlpha + 127) / 255);
+
+        return unchecked((int)(
+            ((uint)Math.Clamp(outAlpha, 0, 255) << 24) |
+            ((uint)Math.Clamp(outRed, 0, 255) << 16) |
+            ((uint)Math.Clamp(outGreen, 0, 255) << 8) |
+            (uint)Math.Clamp(outBlue, 0, 255)));
+    }
+
     private static bool EnsureGdiPlus()
     {
         if (_gdiPlusStartupAttempted)
@@ -816,14 +1046,6 @@ internal static class OsdRenderer
         _gdiPlusToken = UIntPtr.Zero;
         _gdiPlusAvailable = false;
         _gdiPlusStartupAttempted = false;
-    }
-
-    private static uint ColorRefToArgb(uint color)
-    {
-        var red = color & 0xffu;
-        var green = (color >> 8) & 0xffu;
-        var blue = (color >> 16) & 0xffu;
-        return 0xff000000u | (red << 16) | (green << 8) | blue;
     }
 
     private static void DrawFilledRoundRect(

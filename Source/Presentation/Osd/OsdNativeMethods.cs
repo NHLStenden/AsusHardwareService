@@ -29,6 +29,7 @@ internal static class OsdNativeMethods
     internal const uint WmMouseActivate = 0x0021;
     internal const uint WmPrintClient = 0x0318;
     internal const uint WmDwmCompositionChanged = 0x031E;
+    internal const uint WmDpiChanged = 0x02E0;
     internal const uint WmApp = 0x8000;
     internal const uint WmMicStatusChanged = WmApp + 0x31;
     internal const uint WmKeyboardBacklightChanged = WmApp + 0x32;
@@ -65,8 +66,10 @@ internal static class OsdNativeMethods
     internal const int WcaAccentPolicy = 19;
     internal const int AccentDisabled = 0;
     internal const int AccentEnableAcrylicBlurBehind = 4;
-    // Accent-policy colours are AABBGGRR. The values below are the pixel-matched
-    // dark/light material tints used by the current Windows 11-style indicator.
+    // Accent-policy colours are AABBGGRR. These are compatibility heuristics for the legacy
+    // undocumented ACCENT_POLICY path; they are NOT public WinUI/Shell material tokens. Exact
+    // Desktop Acrylic is a compositor recipe (tint + luminosity + blur + noise), not one packed
+    // colour, so keep this layer isolated from the verified semantic foreground tokens below.
     internal const uint DarkAcrylicGradientColor = 0xD2303032;
     internal const uint LightAcrylicGradientColor = 0xDCF3F3F0;
 
@@ -111,8 +114,6 @@ internal static class OsdNativeMethods
     // both directions rather than as a timeout around an independently-timed DWM transition.
     internal const uint ControlFastAnimationDurationMilliseconds = 167;
     internal const int EntranceTranslationDip = 20;
-    internal const int HardwareIndicatorHeightDip = 48;
-    internal const int HardwareIndicatorEdgeMarginDip = 12;
     internal const uint HideDelayMilliseconds = 2000;
     // Graceful service/session changes send WM_CLOSE immediately. This low-frequency Win32
     // watchdog is only a fallback for abrupt service termination or a missed session transition.
@@ -128,25 +129,22 @@ internal static class OsdNativeMethods
     internal const string SpeedHighGlyph = "\uEC4A";
 
     internal static readonly IntPtr HwndTopmost = new(-1);
-    internal static readonly IntPtr DpiAwarenessContextPerMonitorAwareV2 = new(-4);
     internal static readonly UIntPtr HideTimerId = (UIntPtr)1u;
     internal static readonly UIntPtr ServiceWatchTimerId = (UIntPtr)3u;
 
-    internal static int GetLogicalWindowWidth(OnScreenDisplayNotificationKind kind)
+    internal static int DipToPx(double value, uint dpi)
     {
-        return kind switch
-        {
-            OnScreenDisplayNotificationKind.KeyboardBacklight => 192,
-            OnScreenDisplayNotificationKind.DisplayBrightness => 176,
-            OnScreenDisplayNotificationKind.Microphone => 224,
-            OnScreenDisplayNotificationKind.PerformanceGpuMode => 236,
-            _ => 200,
-        };
+        // All layout coordinates are non-negative except for deliberate optical text offsets.
+        // Round each logical boundary independently. This is the WinUI-like model we need at
+        // fractional scaling: derive a physical edge from its DIP coordinate, never from a
+        // separately-rounded window size minus a separately-rounded padding.
+        var scaled = value * dpi / 96.0;
+        return (int)Math.Round(scaled, MidpointRounding.AwayFromZero);
     }
 
     internal static int Scale(int value, uint dpi)
     {
-        return (int)((value * dpi + 48) / 96);
+        return DipToPx(value, dpi);
     }
 
     internal static int ScaleHalfDip(int halfDipUnits, uint dpi)
@@ -218,9 +216,6 @@ internal static class OsdNativeMethods
         IntPtr valueType,
         [Out] byte[] data,
         ref uint dataSize);
-
-    [DllImport("user32.dll")]
-    internal static extern bool SetProcessDpiAwarenessContext(IntPtr dpiContext);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     internal static extern ushort RegisterClassEx(ref WindowClassEx windowClass);

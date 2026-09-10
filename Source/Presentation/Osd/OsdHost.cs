@@ -149,6 +149,11 @@ internal static class OsdHost
                 InvalidateRect(window, IntPtr.Zero, false);
                 return IntPtr.Zero;
 
+            case WmDpiChanged:
+                var newDpi = (uint)(wParam.ToUInt64() & 0xffffu);
+                OsdPresenter.HandleDpiChanged(window, newDpi, lParam);
+                return IntPtr.Zero;
+
             case WmEraseBackground:
                 // WM_PAINT redraws the whole compact surface, avoiding an extra erase/flicker pass.
                 return new IntPtr(1);
@@ -158,7 +163,7 @@ internal static class OsdHost
                 return IntPtr.Zero;
 
             case WmPrintClient:
-                OsdRenderer.DrawStatus(window, new IntPtr(unchecked((long)wParam.ToUInt64())));
+                OsdRenderer.DrawStatusForPrint(window, new IntPtr(unchecked((long)wParam.ToUInt64())));
                 return IntPtr.Zero;
 
             case WmMouseActivate:

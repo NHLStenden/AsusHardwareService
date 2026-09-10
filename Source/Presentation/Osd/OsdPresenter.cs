@@ -51,27 +51,7 @@ internal static class OsdPresenter
 
         var dpi = GetWindowDpiForMonitor(window, monitor, ref monitorInfo);
 
-        OsdHost.WindowDpi = dpi;
-        OsdHost.WindowWidth = Scale(GetLogicalWindowWidth(OsdHost.Notification.Kind), dpi);
-        OsdHost.WindowHeight = Scale(HardwareIndicatorHeightDip, dpi);
-        var edgeMargin = Scale(HardwareIndicatorEdgeMarginDip, dpi);
-        var workAreaWidth = monitorInfo.rcWork.Right - monitorInfo.rcWork.Left;
-        _finalX = OsdTheme.IndicatorPosition == IndicatorPosition.TopLeft
-            ? monitorInfo.rcWork.Left + edgeMargin
-            : monitorInfo.rcWork.Left + ((workAreaWidth - OsdHost.WindowWidth) / 2);
-        _finalY = OsdTheme.IndicatorPosition == IndicatorPosition.BottomCenter
-            ? monitorInfo.rcWork.Bottom - OsdHost.WindowHeight - edgeMargin
-            : monitorInfo.rcWork.Top + edgeMargin;
-
-        // Dismiss through the physical monitor edge, not merely a fixed translation from the
-        // resting position. Keep half a flyout of extra clearance so the DWM shadow/backdrop is
-        // also outside the visible monitor before SW_HIDE. This clearance is an implementation
-        // detail, not a WinUI design token. rcMonitor is intentional: the taskbar is part of the
-        // bottom flyout's exit path.
-        var offScreenVisualClearance = Math.Max(1, OsdHost.WindowHeight / 2);
-        _hideOffScreenY = OsdTheme.IndicatorPosition == IndicatorPosition.BottomCenter
-            ? monitorInfo.rcMonitor.Bottom + offScreenVisualClearance
-            : monitorInfo.rcMonitor.Top - OsdHost.WindowHeight - offScreenVisualClearance;
+        ApplyLayoutForMonitor(dpi, ref monitorInfo);
 
         InvalidateRect(window, IntPtr.Zero, false);
         KillTimer(window, HideTimerId);
@@ -95,6 +75,113 @@ internal static class OsdPresenter
         }
 
         ArmHideTimer(window);
+    }
+
+
+    internal static void HandleDpiChanged(IntPtr window, uint newDpi, IntPtr suggestedRectPointer)
+    {
+        if (newDpi == 0)
+        {
+            newDpi = 96;
+        }
+
+        var layout = OsdLayout.Get(OsdHost.Notification.Kind);
+        OsdHost.WindowDpi = newDpi;
+        OsdHost.WindowWidth = DipToPx(layout.WidthDip, newDpi);
+        OsdHost.WindowHeight = DipToPx(layout.HeightDip, newDpi);
+
+        // Invalidate any in-flight animation before changing coordinate spaces. Posted animation
+        // frames carry a generation token, so stale frames become no-ops instead of moving the
+        // resized window using old-DPI coordinates.
+        _animationGeneration = unchecked(_animationGeneration + 1u);
+        _showAnimationActive = false;
+        _hideAnimationActive = false;
+
+        int x;
+        int y;
+
+        if (IsWindowVisible(window))
+        {
+            // A visible OSD is a position-anchored Shell-style surface rather than a user-draggable
+            // window. Re-anchor it to the work area at the new DPI instead of letting a suggested
+            // rectangle slowly drift the configured margin over repeated DPI changes.
+            var monitor = MonitorFromWindow(window, MonitorDefaultToNearest);
+            var monitorInfo = new MonitorInfo
+            {
+                cbSize = (uint)Marshal.SizeOf<MonitorInfo>(),
+            };
+
+            if (monitor != IntPtr.Zero && GetMonitorInfo(monitor, ref monitorInfo))
+            {
+                ApplyLayoutForMonitor(newDpi, ref monitorInfo);
+                x = _finalX;
+                y = _finalY;
+            }
+            else
+            {
+                (x, y) = GetSuggestedDpiPosition(suggestedRectPointer, _finalX, _finalY);
+            }
+        }
+        else
+        {
+            // ShowStatusWindow temporarily moves a hidden 1x1 HWND to a target monitor in order to
+            // query GetDpiForWindow there. During that move Windows can synchronously send
+            // WM_DPICHANGED. Preserve the suggested monitor transition while hidden; ShowStatusWindow
+            // immediately computes the final Shell anchor afterwards.
+            (x, y) = GetSuggestedDpiPosition(suggestedRectPointer, _finalX, _finalY);
+        }
+
+        SetWindowPos(
+            window,
+            IntPtr.Zero,
+            x,
+            y,
+            OsdHost.WindowWidth,
+            OsdHost.WindowHeight,
+            SwpNoZOrder | SwpNoActivate);
+
+        OsdRenderer.DestroyBackBuffer();
+        InvalidateRect(window, IntPtr.Zero, false);
+    }
+
+    private static (int X, int Y) GetSuggestedDpiPosition(
+        IntPtr suggestedRectPointer,
+        int fallbackX,
+        int fallbackY)
+    {
+        if (suggestedRectPointer == IntPtr.Zero)
+        {
+            return (fallbackX, fallbackY);
+        }
+
+        var suggested = Marshal.PtrToStructure<Rect>(suggestedRectPointer);
+        return (suggested.Left, suggested.Top);
+    }
+
+    private static void ApplyLayoutForMonitor(uint dpi, ref MonitorInfo monitorInfo)
+    {
+        var layout = OsdLayout.Get(OsdHost.Notification.Kind);
+        OsdHost.WindowDpi = dpi;
+        OsdHost.WindowWidth = DipToPx(layout.WidthDip, dpi);
+        OsdHost.WindowHeight = DipToPx(layout.HeightDip, dpi);
+
+        var edgeMargin = DipToPx(layout.EdgeMarginDip, dpi);
+        var workAreaWidth = monitorInfo.rcWork.Right - monitorInfo.rcWork.Left;
+        _finalX = OsdTheme.IndicatorPosition == IndicatorPosition.TopLeft
+            ? monitorInfo.rcWork.Left + edgeMargin
+            : monitorInfo.rcWork.Left + ((workAreaWidth - OsdHost.WindowWidth) / 2);
+        _finalY = OsdTheme.IndicatorPosition == IndicatorPosition.BottomCenter
+            ? monitorInfo.rcWork.Bottom - OsdHost.WindowHeight - edgeMargin
+            : monitorInfo.rcWork.Top + edgeMargin;
+
+        // Dismiss through the physical monitor edge, not merely a fixed translation from the
+        // resting position. Keep half a flyout of extra clearance so the DWM shadow/backdrop is
+        // also outside the visible monitor before SW_HIDE. rcMonitor is intentional: the taskbar
+        // is part of the bottom flyout's exit path.
+        var offScreenVisualClearance = Math.Max(1, OsdHost.WindowHeight / 2);
+        _hideOffScreenY = OsdTheme.IndicatorPosition == IndicatorPosition.BottomCenter
+            ? monitorInfo.rcMonitor.Bottom + offScreenVisualClearance
+            : monitorInfo.rcMonitor.Top - OsdHost.WindowHeight - offScreenVisualClearance;
     }
 
     private static void StartShowAnimation(IntPtr window)

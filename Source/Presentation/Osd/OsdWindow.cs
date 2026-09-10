@@ -12,8 +12,6 @@ internal static class OsdWindow
     /// <returns>A process exit code.</returns>
     public static int Run(OnScreenDisplayNotification? initialNotification)
     {
-        SetProcessDpiAwarenessContext(DpiAwarenessContextPerMonitorAwareV2);
-
         var mutexHandle = CreateMutex(IntPtr.Zero, false, InstanceMutexName);
         var mutexLastError = Marshal.GetLastWin32Error();
         if (mutexHandle == IntPtr.Zero)

@@ -37,6 +37,53 @@ internal static class OsdTheme
         return _isDarkTheme ? Rgb(255, 255, 255) : Rgb(28, 28, 28);
     }
 
+    internal static uint GetLevelTrackArgb()
+    {
+        if (_highContrast)
+        {
+            return ColorRefToOpaqueArgb(GetSysColor(ColorWindowText));
+        }
+
+        // Public WinUI semantic token ControlStrongStrokeColorDefault. The stock WinUI
+        // ProgressBar also uses this resource for ProgressBarBackground. Keep the alpha: on an
+        // Acrylic surface the native track is backdrop-tinted, not an opaque pre-flattened gray.
+        return _isDarkTheme ? 0x8BFFFFFFu : 0x72000000u;
+    }
+
+    internal static uint GetAccentArgb()
+    {
+        return ColorRefToOpaqueArgb(GetAccentColor());
+    }
+
+    internal static uint GetFallbackSurfaceArgb()
+    {
+        if (_highContrast)
+        {
+            return ColorRefToOpaqueArgb(GetSysColor(ColorWindow));
+        }
+
+        return _isDarkTheme ? 0xFF2C2C2Cu : 0xFFF9F9F9u;
+    }
+
+    internal static uint CompositeArgbOverFallbackToColorRef(uint argb)
+    {
+        var background = GetFallbackSurfaceArgb();
+        var alpha = (argb >> 24) & 0xffu;
+        var inverseAlpha = 255u - alpha;
+        var red = (((argb >> 16) & 0xffu) * alpha + ((background >> 16) & 0xffu) * inverseAlpha + 127u) / 255u;
+        var green = (((argb >> 8) & 0xffu) * alpha + ((background >> 8) & 0xffu) * inverseAlpha + 127u) / 255u;
+        var blue = ((argb & 0xffu) * alpha + (background & 0xffu) * inverseAlpha + 127u) / 255u;
+        return Rgb((byte)red, (byte)green, (byte)blue);
+    }
+
+    private static uint ColorRefToOpaqueArgb(uint color)
+    {
+        var red = color & 0xffu;
+        var green = (color >> 8) & 0xffu;
+        var blue = (color >> 16) & 0xffu;
+        return 0xff000000u | (red << 16) | (green << 8) | blue;
+    }
+
     internal static uint GetAccentColor()
     {
         if (_highContrast)
@@ -204,10 +251,9 @@ internal static class OsdTheme
 
         if (_isDarkTheme)
         {
-            // DWMSBT_TRANSIENTWINDOW has no tint parameter and on current Windows 11 builds can
-            // expose the bright Desktop Acrylic underpaint even with immersive dark mode enabled.
-            // The Shell's dark flyouts add a #2C2C2C Acrylic tint, so use the accent-policy path
-            // only for dark mode to reproduce that layer while keeping the same DWM blur.
+            // DWMSBT_TRANSIENTWINDOW does not expose the material's tint/luminosity recipe.
+            // Retain the project's legacy tint-capable AccentPolicy approximation in dark mode.
+            // This path is intentionally treated as an approximation, not a published Shell token.
             var noBackdrop = DwmsbtNone;
             DwmSetWindowAttribute(window, DwmwaSystemBackdropType, ref noBackdrop, sizeof(int));
             if (frameResult >= 0 && SetAcrylicAccentPolicy(window, enabled: true, gradientColor: DarkAcrylicGradientColor))
@@ -216,15 +262,14 @@ internal static class OsdTheme
                 return;
             }
 
-            // If the tint-capable path is ever unavailable, prefer WinUI's #2C2C2C fallback over
-            // the visibly washed-out untinted transient backdrop.
+            // If the tint-capable path is unavailable, use the documented solid Fluent fallback.
             _systemBackdropEnabled = false;
             return;
         }
 
-        // The transient backdrop is too opaque/flat for the native light hardware flyout on
-        // current Windows 11 builds. Use the same tint-capable native Acrylic path as dark mode,
-        // with the light Shell surface tint. Fall back to DWMSBT_TRANSIENTWINDOW if unavailable.
+        // Keep the same legacy tint-capable approximation in light mode for visual continuity.
+        // Fall back to the supported transient system backdrop when the private AccentPolicy path
+        // is unavailable.
         var noLightBackdrop = DwmsbtNone;
         DwmSetWindowAttribute(window, DwmwaSystemBackdropType, ref noLightBackdrop, sizeof(int));
         if (frameResult >= 0 &&
