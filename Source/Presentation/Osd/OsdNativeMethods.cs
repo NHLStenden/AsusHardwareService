@@ -70,8 +70,11 @@ internal static class OsdNativeMethods
     // undocumented ACCENT_POLICY path; they are NOT public WinUI/Shell material tokens. Exact
     // Desktop Acrylic is a compositor recipe (tint + luminosity + blur + noise), not one packed
     // colour, so keep this layer isolated from the verified semantic foreground tokens below.
-    internal const uint DarkAcrylicGradientColor = 0xD2303032;
-    internal const uint LightAcrylicGradientColor = 0xDCF3F3F0;
+    // Calibrated against the supplied native/custom Windows 11 captures. Keep the existing alpha
+    // (blur/material strength) and only correct the tint bias: the old values rendered ~3-5 RGB
+    // levels too bright and too neutral. Format is AABBGGRR.
+    internal const uint DarkAcrylicGradientColor = 0xD22C2F2C;  // RGB #2C2F2C
+    internal const uint LightAcrylicGradientColor = 0xDCEDF0EB; // RGB #EBF0ED
 
     internal const uint SpiGetHighContrast = 0x0042;
     internal const uint SpiGetClientAreaAnimation = 0x1042;
@@ -140,6 +143,11 @@ internal static class OsdNativeMethods
         // separately-rounded window size minus a separately-rounded padding.
         var scaled = value * dpi / 96.0;
         return (int)Math.Round(scaled, MidpointRounding.AwayFromZero);
+    }
+
+    internal static int DipToPxFloor(double value, uint dpi)
+    {
+        return (int)Math.Floor(value * dpi / 96.0);
     }
 
     internal static int Scale(int value, uint dpi)

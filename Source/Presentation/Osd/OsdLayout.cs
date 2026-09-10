@@ -17,14 +17,13 @@ internal static class OsdLayout
     internal const double CompactSurfaceHeightDip = 45.0;
     internal const double EdgeMarginDip = 15.0;
 
-    // Cross-theme pixel comparison puts the current 8..40-DIP glyph slot about 1 DIP too far
-    // right relative to the native surface. Keep the 32-DIP slot and its existing vertical optical
-    // centre, but translate it left by one DIP. The 2..45 vertical bounds preserve the old 23.5-DIP
-    // rectangle centre after the surface height changes from 48 to 45 DIPs.
-    internal static readonly DipRect StandardIconRect = new(7.0, 2.0, 39.0, 45.0);
+    // Native/custom capture alignment leaves the standard glyph about one physical pixel left at
+    // 153 DPI. A half-DIP nudge keeps the 32-DIP slot and lands on that missing pixel without
+    // disturbing the already-correct vertical optical centre.
+    internal static readonly DipRect StandardIconRect = new(7.5, 2.0, 39.5, 45.0);
 
     // Native brightness level geometry measured from the supplied captures.
-    internal static readonly DipRect BrightnessTrackRect = new(45.0, 20.0, 155.0, 24.0);
+    internal static readonly DipRect BrightnessTrackRect = new(44.5, 20.0, 155.0, 24.0);
 
     // Shared text-family inset. This is not claimed as a private Shell XAML constant; it is a
     // stable layout primitive for custom icon+text indicators that preserves the existing design.

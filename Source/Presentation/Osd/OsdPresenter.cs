@@ -166,12 +166,18 @@ internal static class OsdPresenter
         OsdHost.WindowHeight = DipToPx(layout.HeightDip, dpi);
 
         var edgeMargin = DipToPx(layout.EdgeMarginDip, dpi);
+        // The supplied native bottom-centred capture resolves 15 DIP to 23 px at 153 DPI, i.e.
+        // floor rather than nearest. Keep this local to the bottom anchor; element geometry still
+        // rounds each edge independently through DipToPx().
+        var bottomEdgeMargin = DipToPxFloor(layout.EdgeMarginDip, dpi);
         var workAreaWidth = monitorInfo.rcWork.Right - monitorInfo.rcWork.Left;
         _finalX = OsdTheme.IndicatorPosition == IndicatorPosition.TopLeft
             ? monitorInfo.rcWork.Left + edgeMargin
-            : monitorInfo.rcWork.Left + ((workAreaWidth - OsdHost.WindowWidth) / 2);
+            // For an odd amount of free space Windows' centred indicator lands on the right-hand
+            // centre pixel. Integer division alone floors and puts our HWND one pixel left.
+            : monitorInfo.rcWork.Left + ((workAreaWidth - OsdHost.WindowWidth + 1) / 2);
         _finalY = OsdTheme.IndicatorPosition == IndicatorPosition.BottomCenter
-            ? monitorInfo.rcWork.Bottom - OsdHost.WindowHeight - edgeMargin
+            ? monitorInfo.rcWork.Bottom - OsdHost.WindowHeight - bottomEdgeMargin
             : monitorInfo.rcWork.Top + edgeMargin;
 
         // Dismiss through the physical monitor edge, not merely a fixed translation from the

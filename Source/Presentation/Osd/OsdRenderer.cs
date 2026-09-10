@@ -8,6 +8,11 @@ namespace AsusHardwareService.Presentation.Osd;
 /// </summary>
 internal static class OsdRenderer
 {
+    // The 14-DIP composited icon was one source pixel thinner than the native Windows glyph at
+    // 153 DPI. 14.5 DIP becomes 23 px there (vs. 22 px), which fixes coverage without the much
+    // larger jump to 15/16 DIP. Body/value text remains 14 DIP.
+    private const double IconFontSizeDip = 14.5;
+
     // Persistent back buffer: the compositor only sees complete frames.
     private static IntPtr _backBufferDc;
     private static IntPtr _backBufferBitmap;
@@ -441,7 +446,7 @@ internal static class OsdRenderer
         }
 
         var font = CreateFont(
-            -Scale(14, dpi),
+            -DipToPx(IconFontSizeDip, dpi),
             0,
             0,
             0,
@@ -561,7 +566,7 @@ internal static class OsdRenderer
                 DrawCompositedTextOnGlass(
                     window, deviceContext, dpi, KeyboardGlyph,
                     iconRect.Left, iconRect.Top, iconRect.Right, iconRect.Bottom,
-                    "Segoe Fluent Icons", 14, 400, DtCenter, color);
+                    "Segoe Fluent Icons", IconFontSizeDip, 400, DtCenter, color);
 
                 if (layout.ValueRect is { } valueRectDip)
                 {
@@ -578,7 +583,7 @@ internal static class OsdRenderer
                 DrawCompositedTextOnGlass(
                     window, deviceContext, dpi, BrightnessGlyph,
                     iconRect.Left, iconRect.Top, iconRect.Right, iconRect.Bottom,
-                    "Segoe Fluent Icons", 14, 400, DtCenter, color);
+                    "Segoe Fluent Icons", IconFontSizeDip, 400, DtCenter, color);
                 break;
 
             case OnScreenDisplayNotificationKind.PerformanceGpuMode:
@@ -586,7 +591,7 @@ internal static class OsdRenderer
                 DrawCompositedTextOnGlass(
                     window, deviceContext, dpi, silent ? SpeedMediumGlyph : SpeedHighGlyph,
                     iconRect.Left, iconRect.Top, iconRect.Right, iconRect.Bottom,
-                    "Segoe Fluent Icons", 14, 400, DtCenter, color);
+                    "Segoe Fluent Icons", IconFontSizeDip, 400, DtCenter, color);
 
                 var performanceMode = silent ? "Silent" : "Performance";
                 var gpuMode = (OsdHost.Notification.Value & 2) != 0 ? "Eco" : "Standard";
@@ -606,7 +611,7 @@ internal static class OsdRenderer
                 DrawCompositedTextOnGlass(
                     window, deviceContext, dpi, muted ? MicrophoneOffGlyph : MicrophoneOnGlyph,
                     iconRect.Left, iconRect.Top, iconRect.Right, iconRect.Bottom,
-                    "Segoe Fluent Icons", 14, 400, DtCenter, color);
+                    "Segoe Fluent Icons", IconFontSizeDip, 400, DtCenter, color);
 
                 if (layout.TextRect is { } microphoneTextRectDip)
                 {
@@ -631,7 +636,7 @@ internal static class OsdRenderer
         int right,
         int bottom,
         string fontFace,
-        int fontSizeDip,
+        double fontSizeDip,
         int weight,
         uint horizontalAlignment,
         uint color)
@@ -672,7 +677,7 @@ internal static class OsdRenderer
 
         var oldBitmap = SelectObject(memoryDc, bitmap);
         var font = CreateFont(
-            -Scale(fontSizeDip, dpi),
+            -DipToPx(fontSizeDip, dpi),
             0, 0, 0, weight,
             false, false, false,
             1, 0, 0, 4, 0,

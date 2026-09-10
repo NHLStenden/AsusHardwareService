@@ -262,8 +262,15 @@ internal static class OsdTheme
                 return;
             }
 
-            // If the tint-capable path is unavailable, use the documented solid Fluent fallback.
-            _systemBackdropEnabled = false;
+            // If the tint-capable path is unavailable, keep Acrylic behavior through the
+            // documented transient system backdrop rather than dropping straight to a solid fill.
+            var darkFallbackBackdropType = DwmsbtTransientWindow;
+            var darkFallbackBackdropResult = DwmSetWindowAttribute(
+                window,
+                DwmwaSystemBackdropType,
+                ref darkFallbackBackdropType,
+                sizeof(int));
+            _systemBackdropEnabled = darkFallbackBackdropResult >= 0 && frameResult >= 0;
             return;
         }
 
