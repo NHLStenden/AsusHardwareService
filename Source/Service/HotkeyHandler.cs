@@ -15,6 +15,7 @@ internal sealed class HotkeyHandler
 {
     private readonly ILogger<HotkeyHandler> _logger;
     private readonly DisplayBrightnessController _displayBrightness;
+    private readonly DisplayTopologyController _displayTopology;
     private readonly KeyboardBacklightController _keyboardBacklight;
     private readonly MicrophoneMuteController _microphoneMute;
     private readonly IHardwareStatusPublisher _statusPublisher;
@@ -25,6 +26,7 @@ internal sealed class HotkeyHandler
     public HotkeyHandler(
         ILogger<HotkeyHandler> logger,
         DisplayBrightnessController displayBrightness,
+        DisplayTopologyController displayTopology,
         KeyboardBacklightController keyboardBacklight,
         MicrophoneMuteController microphoneMute,
         IHardwareStatusPublisher statusPublisher,
@@ -32,6 +34,7 @@ internal sealed class HotkeyHandler
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _displayBrightness = displayBrightness ?? throw new ArgumentNullException(nameof(displayBrightness));
+        _displayTopology = displayTopology ?? throw new ArgumentNullException(nameof(displayTopology));
         _keyboardBacklight = keyboardBacklight ?? throw new ArgumentNullException(nameof(keyboardBacklight));
         _microphoneMute = microphoneMute ?? throw new ArgumentNullException(nameof(microphoneMute));
         _statusPublisher = statusPublisher ?? throw new ArgumentNullException(nameof(statusPublisher));
@@ -62,6 +65,10 @@ internal sealed class HotkeyHandler
 
                 case AsusHotkey.DisplayBrightnessIncrease:
                     _statusPublisher.Publish(new DisplayBrightnessStatus(_displayBrightness.Increase()));
+                    break;
+
+                case AsusHotkey.DisplayTopologyToggle:
+                    _displayTopology.Toggle();
                     break;
 
                 case AsusHotkey.MicrophoneMuteToggle:

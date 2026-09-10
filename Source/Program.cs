@@ -52,6 +52,7 @@ builder.Services.AddSingleton<KeyboardBacklightController>();
 builder.Services.AddSingleton<OperatingModeController>();
 builder.Services.AddSingleton<SplendidProfileApplier>();
 builder.Services.AddSingleton<DisplayBrightnessController>();
+builder.Services.AddSingleton<DisplayTopologyController>();
 builder.Services.AddSingleton<LaptopDisplayController>();
 builder.Services.AddSingleton<MicrophoneMuteController>();
 builder.Services.AddSingleton<UserSessionService>();

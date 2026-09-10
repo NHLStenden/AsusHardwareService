@@ -1,6 +1,16 @@
 using System.Runtime.InteropServices;
 
 namespace AsusHardwareService.Windows.Display;
+
+/// <summary>Windows projection topologies used by the display hotkey.</summary>
+internal enum DisplayTopology : uint
+{
+    Internal = 0x00000001,
+    Clone = 0x00000002,
+    Extend = 0x00000004,
+    External = 0x00000008,
+}
+
 /// <summary>
 /// Provides native Windows display enumeration and refresh-rate switching helpers.
 /// </summary>
@@ -17,6 +27,62 @@ internal static class DisplayNativeMethods
     private const int DisplayDeviceActive = 0x00000001;
     private const int DisplayDeviceAttachedToDesktop = 0x00000001;
     private const int DisplayDeviceMirroringDriver = 0x00000008;
+    private const int ErrorSuccess = 0;
+    private const int ErrorInsufficientBuffer = 122;
+    private const QueryDisplayConfigFlags QueryDatabaseCurrent = QueryDisplayConfigFlags.DatabaseCurrent;
+
+    /// <summary>Gets the active Windows display topology from the CCD persistence database.</summary>
+    public static DisplayTopology? GetCurrentTopology()
+    {
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var result = GetDisplayConfigBufferSizes(
+                QueryDatabaseCurrent,
+                out var pathCount,
+                out var modeCount);
+            if (result != ErrorSuccess || pathCount == 0 || modeCount == 0)
+            {
+                return null;
+            }
+
+            var paths = new DisplayConfigPathInfo[pathCount];
+            var modes = new DisplayConfigModeInfo[modeCount];
+            var topology = DisplayTopology.Internal;
+            result = QueryDisplayConfig(
+                QueryDatabaseCurrent,
+                ref pathCount,
+                paths,
+                ref modeCount,
+                modes,
+                out topology);
+
+            if (result == ErrorInsufficientBuffer)
+            {
+                continue;
+            }
+
+            return result == ErrorSuccess ? topology : null;
+        }
+
+        return null;
+    }
+
+    /// <summary>Applies Windows' last known configuration for the requested projection topology.</summary>
+    public static bool SetDisplayTopology(DisplayTopology topology)
+    {
+        var flags =
+            (DisplayConfigFlags)(uint)topology |
+            DisplayConfigFlags.Apply |
+            DisplayConfigFlags.PathPersistIfRequired;
+
+        return SetDisplayConfig(
+            0,
+            IntPtr.Zero,
+            0,
+            IntPtr.Zero,
+            flags) == ErrorSuccess;
+    }
+
     /// <summary>
     /// Finds the most likely laptop display device.
     /// </summary>
@@ -227,6 +293,30 @@ internal static class DisplayNativeMethods
         }
     }
 
+
+    [DllImport("user32.dll")]
+    private static extern int GetDisplayConfigBufferSizes(
+        QueryDisplayConfigFlags flags,
+        out uint numPathArrayElements,
+        out uint numModeInfoArrayElements);
+
+    [DllImport("user32.dll")]
+    private static extern int QueryDisplayConfig(
+        QueryDisplayConfigFlags flags,
+        ref uint numPathArrayElements,
+        [Out] DisplayConfigPathInfo[] pathArray,
+        ref uint numModeInfoArrayElements,
+        [Out] DisplayConfigModeInfo[] modeInfoArray,
+        out DisplayTopology currentTopologyId);
+
+    [DllImport("user32.dll")]
+    private static extern int SetDisplayConfig(
+        uint numPathArrayElements,
+        IntPtr pathArray,
+        uint numModeInfoArrayElements,
+        IntPtr modeInfoArray,
+        DisplayConfigFlags flags);
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern bool EnumDisplayDevices(
         string? lpDevice,
@@ -276,6 +366,149 @@ internal static class DisplayNativeMethods
             };
         }
     }
+
+    [Flags]
+    private enum QueryDisplayConfigFlags : uint
+    {
+        DatabaseCurrent = 0x00000004,
+    }
+
+    [Flags]
+    private enum DisplayConfigFlags : uint
+    {
+        Apply = 0x00000080,
+        PathPersistIfRequired = 0x00000800,
+    }
+
+    private enum DisplayConfigVideoOutputTechnology : int { Other = -1 }
+    private enum DisplayConfigRotation : uint { Identity = 1 }
+    private enum DisplayConfigScaling : uint { Identity = 1 }
+    private enum DisplayConfigScanLineOrdering : uint { Unspecified = 0 }
+    private enum DisplayConfigModeInfoType : uint { Source = 1, Target = 2, DesktopImage = 3 }
+    private enum DisplayConfigPixelFormat : uint { PixelFormat8Bpp = 1 }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Luid
+    {
+        public uint LowPart;
+        public int HighPart;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DisplayConfigRational
+    {
+        public uint Numerator;
+        public uint Denominator;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DisplayConfigPathSourceInfo
+    {
+        public Luid AdapterId;
+        public uint Id;
+        public uint ModeInfoIdx;
+        public uint StatusFlags;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DisplayConfigPathTargetInfo
+    {
+        public Luid AdapterId;
+        public uint Id;
+        public uint ModeInfoIdx;
+        public DisplayConfigVideoOutputTechnology OutputTechnology;
+        public DisplayConfigRotation Rotation;
+        public DisplayConfigScaling Scaling;
+        public DisplayConfigRational RefreshRate;
+        public DisplayConfigScanLineOrdering ScanLineOrdering;
+        [MarshalAs(UnmanagedType.Bool)]
+        public bool TargetAvailable;
+        public uint StatusFlags;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DisplayConfigPathInfo
+    {
+        public DisplayConfigPathSourceInfo SourceInfo;
+        public DisplayConfigPathTargetInfo TargetInfo;
+        public uint Flags;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DisplayConfig2DRegion
+    {
+        public uint Cx;
+        public uint Cy;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PointL
+    {
+        public int X;
+        public int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RectL
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DisplayConfigVideoSignalInfo
+    {
+        public ulong PixelRate;
+        public DisplayConfigRational HSyncFreq;
+        public DisplayConfigRational VSyncFreq;
+        public DisplayConfig2DRegion ActiveSize;
+        public DisplayConfig2DRegion TotalSize;
+        public uint VideoStandard;
+        public DisplayConfigScanLineOrdering ScanLineOrdering;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DisplayConfigTargetMode
+    {
+        public DisplayConfigVideoSignalInfo TargetVideoSignalInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DisplayConfigSourceMode
+    {
+        public uint Width;
+        public uint Height;
+        public DisplayConfigPixelFormat PixelFormat;
+        public PointL Position;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DisplayConfigDesktopImageInfo
+    {
+        public PointL PathSourceSize;
+        public RectL DesktopImageRegion;
+        public RectL DesktopImageClip;
+    }
+
+    [StructLayout(LayoutKind.Explicit)]
+    private struct DisplayConfigModeUnion
+    {
+        [FieldOffset(0)] public DisplayConfigTargetMode TargetMode;
+        [FieldOffset(0)] public DisplayConfigSourceMode SourceMode;
+        [FieldOffset(0)] public DisplayConfigDesktopImageInfo DesktopImageInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DisplayConfigModeInfo
+    {
+        public DisplayConfigModeInfoType InfoType;
+        public uint Id;
+        public Luid AdapterId;
+        public DisplayConfigModeUnion ModeInfo;
+    }
+
     [Flags]
     private enum DisplayModeField : uint
     {

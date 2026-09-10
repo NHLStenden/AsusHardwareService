@@ -23,6 +23,9 @@ internal enum AsusHotkey
     /// <summary>Toggle the default capture-device mute state.</summary>
     MicrophoneMuteToggle,
 
+    /// <summary>Toggle between the internal and external display topologies.</summary>
+    DisplayTopologyToggle,
+
     /// <summary>Toggle the paired ASUS performance/GPU mode.</summary>
     OperatingModeToggle,
 
@@ -47,6 +50,7 @@ internal static class AsusHotkeyMapper
         16 => AsusHotkey.DisplayBrightnessDecrease,
         32 => AsusHotkey.DisplayBrightnessIncrease,
         124 => AsusHotkey.MicrophoneMuteToggle,
+        107 => AsusHotkey.DisplayTopologyToggle,
         174 => AsusHotkey.OperatingModeToggle,
         56 => AsusHotkey.VendorApplicationKey,
         _ => AsusHotkey.Unknown,

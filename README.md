@@ -9,6 +9,7 @@ The service runs in the background and handles a small set of ASUS-specific hard
 - applies a configured battery charge limit at startup
 - listens for ASUS HID hotkey events
 - adjusts built-in display brightness
+- handles the display-off hotkey
 - adjusts keyboard backlight brightness
 - applies ASUS Splendid display color settings
 - toggles the mute state of the microphone

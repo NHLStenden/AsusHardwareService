@@ -20,6 +20,12 @@ internal static class DisplayCommand
     /// </summary>
     public const string ScreenCommandName = "screen";
 
+    /// <summary>Subcommand for Windows display-topology control.</summary>
+    public const string TopologyCommandName = "topology";
+
+    /// <summary>Topology mode that toggles between internal-only and external-only.</summary>
+    public const string TopologyModeToggle = "toggle";
+
     /// <summary>
     /// Screen mode that chooses the refresh rate from the current power source.
     /// </summary>
@@ -67,6 +73,7 @@ internal static class DisplayCommand
             return args[0].ToLowerInvariant() switch
             {
                 ScreenCommandName => ApplyScreen(args),
+                TopologyCommandName => ApplyTopology(args),
                 "dump" => DumpDisplays(),
                 _ => UnknownCommand(args[0]),
             };
@@ -123,6 +130,32 @@ internal static class DisplayCommand
 
         return changed ? 0 : 4;
     }
+
+    private static int ApplyTopology(string[] args)
+    {
+        if (args.Length < 2 || !args[1].Equals(TopologyModeToggle, StringComparison.OrdinalIgnoreCase))
+        {
+            Console.Error.WriteLine("Missing or unknown topology mode.");
+            WriteUsage();
+            return 2;
+        }
+
+        var current = DisplayNativeMethods.GetCurrentTopology();
+        if (!current.HasValue)
+        {
+            Console.Error.WriteLine("Could not determine the current Windows display topology.");
+            return 3;
+        }
+
+        var requested = current.Value == DisplayTopology.External
+            ? DisplayTopology.Internal
+            : DisplayTopology.External;
+
+        var changed = DisplayNativeMethods.SetDisplayTopology(requested);
+        Console.WriteLine($"Display topology {current.Value} -> {requested}: {(changed ? "OK" : "Failed")}");
+        return changed ? 0 : 4;
+    }
+
     private static int DumpDisplays()
     {
         foreach (var line in DisplayNativeMethods.DumpDisplays())
@@ -145,6 +178,7 @@ internal static class DisplayCommand
         Console.Error.WriteLine("  AsusHardwareService.exe display screen auto");
         Console.Error.WriteLine("  AsusHardwareService.exe display screen 60");
         Console.Error.WriteLine("  AsusHardwareService.exe display screen 240-od");
+        Console.Error.WriteLine("  AsusHardwareService.exe display topology toggle");
         Console.Error.WriteLine("  AsusHardwareService.exe display dump");
     }
 }
