@@ -125,9 +125,9 @@ internal static class OsdNativeMethods
     // Windows 11 ships these glyphs in Segoe Fluent Icons. Keep the font glyph optically
     // centered inside the 32-DIP leading icon slot used by this compact indicator.
     internal const string BrightnessGlyph = "\uE706";
-    internal const string KeyboardGlyph = "\uE765";
+    internal const string KeyboardGlyph = "\uED39";
     internal const string MicrophoneOffGlyph = "\uEC54";
-    internal const string MicrophoneOnGlyph = "\uE720";
+    internal const string MicrophoneOnGlyph = "\uEC71";
     internal const string SpeedMediumGlyph = "\uEC49";
     internal const string SpeedHighGlyph = "\uEC4A";
 

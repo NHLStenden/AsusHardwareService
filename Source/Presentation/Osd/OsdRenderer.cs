@@ -351,7 +351,7 @@ internal static class OsdRenderer
             foreground,
             layout.IconRect);
 
-        var performanceMode = silent ? "Silent" : "Performance";
+        var performanceMode = silent ? "Silent" : "Balanced";
         var gpuMode = (modeValue & 2) != 0 ? "Eco" : "Standard";
         if (layout.TextRect is { } textRect)
         {
@@ -593,7 +593,7 @@ internal static class OsdRenderer
                     iconRect.Left, iconRect.Top, iconRect.Right, iconRect.Bottom,
                     "Segoe Fluent Icons", IconFontSizeDip, 400, DtCenter, color);
 
-                var performanceMode = silent ? "Silent" : "Performance";
+                var performanceMode = silent ? "Silent" : "Balanced";
                 var gpuMode = (OsdHost.Notification.Value & 2) != 0 ? "Eco" : "Standard";
                 if (layout.TextRect is { } performanceTextRectDip)
                 {
