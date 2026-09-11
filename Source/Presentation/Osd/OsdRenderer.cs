@@ -8,10 +8,7 @@ namespace AsusHardwareService.Presentation.Osd;
 /// </summary>
 internal static class OsdRenderer
 {
-    // The 14-DIP composited icon was one source pixel thinner than the native Windows glyph at
-    // 153 DPI. 14.5 DIP becomes 23 px there (vs. 22 px), which fixes coverage without the much
-    // larger jump to 15/16 DIP. Body/value text remains 14 DIP.
-    private const double IconFontSizeDip = 14.5;
+    private const double IconFontSizeDip = 15.0;
 
     // Persistent back buffer: the compositor only sees complete frames.
     private static IntPtr _backBufferDc;
