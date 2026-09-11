@@ -6,23 +6,21 @@ namespace AsusHardwareService.Presentation.Osd;
 /// Declarative, DPI-independent geometry for Windows-11-style hardware indicators.
 ///
 /// Coordinates are absolute DIPs measured from the top-left of the visible surface. Keeping
-/// right/bottom edges absolute is intentional: subtracting separately-rounded paddings from an
-/// already-rounded window size produces one-pixel errors at fractional DPIs such as 153 DPI.
+/// right/bottom edges absolute is intentional: rounding each edge independently avoids cumulative
+/// one-pixel errors at fractional display scales.
 /// </summary>
 internal static class OsdLayout
 {
-    // Shared shell-style metrics. Brightness is directly measured from the supplied native
-    // Windows 11 captures at 153 DPI; the other templates reuse those proven family metrics and
-    // retain their content-driven widths until equivalent native captures are available.
+    // Shared shell-style metrics expressed in DIPs so every template scales consistently across
+    // per-monitor DPI settings while retaining its content-driven width.
     internal const double CompactSurfaceHeightDip = 45.0;
     internal const double EdgeMarginDip = 15.0;
 
-    // Native/custom capture alignment leaves the standard glyph about one physical pixel left at
-    // 153 DPI. A half-DIP nudge keeps the 32-DIP slot and lands on that missing pixel without
-    // disturbing the already-correct vertical optical centre.
+    // The half-DIP horizontal offset provides optical alignment for the standard Fluent glyph slot
+    // without changing its 32-DIP width or vertical centre.
     internal static readonly DipRect StandardIconRect = new(7.5, 2.0, 39.5, 45.0);
 
-    // Native brightness level geometry measured from the supplied captures.
+    // Brightness level geometry in DIPs.
     internal static readonly DipRect BrightnessTrackRect = new(44.5, 20.0, 155.0, 24.0);
 
     // Shared text-family inset. This is not claimed as a private Shell XAML constant; it is a
@@ -31,9 +29,8 @@ internal static class OsdLayout
     internal const double TextRightInsetDip = 16.0;
     internal const double TextTopDip = 2.0;
 
-    // Keyboard-backlight keeps its existing optical icon X calibration because we do not have a
-    // native keyboard-backlight capture to justify moving it. Its level track was already 110 DIPs
-    // wide; expressing it as absolute edges makes that shared level-family metric explicit.
+    // Keyboard backlight uses its own optical icon slot. The level track is 110 DIPs wide and is
+    // expressed with absolute edges to keep scaling and rounding deterministic.
     internal static readonly DipRect KeyboardIconRect = new(2.0, 2.0, 34.0, 45.0);
     internal static readonly DipRect KeyboardTrackRect = new(42.0, 20.0, 152.0, 24.0);
     internal static readonly DipRect KeyboardValueRect = new(152.0, -2.0, 192.0, 44.0);

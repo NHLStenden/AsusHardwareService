@@ -70,9 +70,8 @@ internal static class OsdNativeMethods
     // undocumented ACCENT_POLICY path; they are NOT public WinUI/Shell material tokens. Exact
     // Desktop Acrylic is a compositor recipe (tint + luminosity + blur + noise), not one packed
     // colour, so keep this layer isolated from the verified semantic foreground tokens below.
-    // Calibrated against the supplied native/custom Windows 11 captures. Keep the existing alpha
-    // (blur/material strength) and only correct the tint bias: the old values rendered ~3-5 RGB
-    // levels too bright and too neutral. Format is AABBGGRR.
+    // Tuned to approximate the Windows 11 transient Acrylic appearance while preserving the
+    // intended blur/material strength. Format is AABBGGRR.
     internal const uint DarkAcrylicGradientColor = 0xD22C2F2C;  // RGB #2C2F2C
     internal const uint LightAcrylicGradientColor = 0xDCEDF0EB; // RGB #EBF0ED
 

@@ -8,6 +8,8 @@ namespace AsusHardwareService.Presentation.Osd;
 /// </summary>
 internal static class OsdRenderer
 {
+    // Use the Windows 11 optical size for Segoe Fluent Icons across per-monitor DPI scales.
+    // Body/value text remains 14 DIP.
     private const double IconFontSizeDip = 15.0;
 
     // Persistent back buffer: the compositor only sees complete frames.

@@ -166,8 +166,8 @@ internal static class OsdPresenter
         OsdHost.WindowHeight = DipToPx(layout.HeightDip, dpi);
 
         var edgeMargin = DipToPx(layout.EdgeMarginDip, dpi);
-        // The supplied native bottom-centred capture resolves 15 DIP to 23 px at 153 DPI, i.e.
-        // floor rather than nearest. Keep this local to the bottom anchor; element geometry still
+        // Floor the bottom edge margin so fractional display scales do not push a bottom-centred
+        // indicator one physical pixel farther from the work-area edge. Element geometry still
         // rounds each edge independently through DipToPx().
         var bottomEdgeMargin = DipToPxFloor(layout.EdgeMarginDip, dpi);
         var workAreaWidth = monitorInfo.rcWork.Right - monitorInfo.rcWork.Left;
