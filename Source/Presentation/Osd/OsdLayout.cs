@@ -29,9 +29,8 @@ internal static class OsdLayout
     internal const double TextRightInsetDip = 16.0;
     internal const double TextTopDip = 2.0;
 
-    // Keyboard backlight uses its own optical icon slot. The level track is 110 DIPs wide and is
+    // Keyboard backlight level geometry in DIPs. The level track is 110 DIPs wide and is
     // expressed with absolute edges to keep scaling and rounding deterministic.
-    internal static readonly DipRect KeyboardIconRect = new(2.0, 2.0, 34.0, 45.0);
     internal static readonly DipRect KeyboardTrackRect = new(42.0, 20.0, 152.0, 24.0);
     internal static readonly DipRect KeyboardValueRect = new(152.0, -2.0, 192.0, 44.0);
 
@@ -52,7 +51,7 @@ internal static class OsdLayout
                 WidthDip: 192.0,
                 HeightDip: CompactSurfaceHeightDip,
                 EdgeMarginDip: EdgeMarginDip,
-                IconRect: KeyboardIconRect,
+                IconRect: StandardIconRect,
                 LevelTrackRect: KeyboardTrackRect,
                 ValueRect: KeyboardValueRect,
                 TextRect: null),
