@@ -50,7 +50,7 @@ internal static class AsusHotkeyMapper
         16 => AsusHotkey.DisplayBrightnessDecrease,
         32 => AsusHotkey.DisplayBrightnessIncrease,
         124 => AsusHotkey.MicrophoneMuteToggle,
-        107 => AsusHotkey.DisplayTopologyToggle,
+        108 => AsusHotkey.DisplayTopologyToggle,
         174 => AsusHotkey.OperatingModeToggle,
         56 => AsusHotkey.VendorApplicationKey,
         _ => AsusHotkey.Unknown,
