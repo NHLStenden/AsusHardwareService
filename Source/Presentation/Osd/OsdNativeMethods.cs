@@ -31,6 +31,8 @@ internal static class OsdNativeMethods
     internal const uint WmMouseMove = 0x0200;
     internal const uint WmLButtonDown = 0x0201;
     internal const uint WmLButtonUp = 0x0202;
+    internal const uint WmCaptureChanged = 0x0215;
+    internal const uint WmMouseLeave = 0x02A3;
     internal const uint WmMouseActivate = 0x0021;
     internal const uint WmPrintClient = 0x0318;
     internal const uint WmDwmCompositionChanged = 0x031E;
@@ -91,6 +93,8 @@ internal static class OsdNativeMethods
     // intended blur/material strength. Format is AABBGGRR.
     internal const uint DarkAcrylicGradientColor = 0xD22C2F2C;  // RGB #2C2F2C
     internal const uint LightAcrylicGradientColor = 0xDCEDF0EB; // RGB #EBF0ED
+
+    internal const uint TmeLeave = 0x00000002;
 
     internal const uint SpiGetHighContrast = 0x0042;
     internal const uint SpiGetClientAreaAnimation = 0x1042;
@@ -339,6 +343,9 @@ internal static class OsdNativeMethods
 
     [DllImport("user32.dll")]
     internal static extern bool ReleaseCapture();
+
+    [DllImport("user32.dll")]
+    internal static extern bool TrackMouseEvent(ref TrackMouseEventData trackMouseEvent);
 
     [DllImport("user32.dll")]
     internal static extern bool UpdateWindow(IntPtr window);
@@ -653,6 +660,16 @@ internal static class OsdNativeMethods
         public int Top;
         public int Right;
         public int Bottom;
+    }
+
+    /// <summary>Native TRACKMOUSEEVENT payload used to request pointer-leave notifications.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TrackMouseEventData
+    {
+        public uint cbSize;
+        public uint dwFlags;
+        public IntPtr hwndTrack;
+        public uint dwHoverTime;
     }
 
     [StructLayout(LayoutKind.Sequential)]

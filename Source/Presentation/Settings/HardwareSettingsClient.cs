@@ -51,7 +51,7 @@ internal sealed class HardwareSettingsClient
             PipeOptions.Asynchronous);
         await pipe.ConnectAsync(connectTimeout.Token).ConfigureAwait(false);
 
-        // Applying a limit can legitimately wait for the ASUS ACPI driver service to transition.
+        // Applying a hardware setting can legitimately wait for ASUS ACPI or GPU transitions.
         // Keep the fast connection timeout separate from the operation timeout so a healthy but
         // temporarily-stopped driver is not misreported as a dead settings service.
         using var operationTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

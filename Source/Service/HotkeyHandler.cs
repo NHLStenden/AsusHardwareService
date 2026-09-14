@@ -21,6 +21,7 @@ internal sealed class HotkeyHandler
     private readonly IHardwareStatusPublisher _statusPublisher;
     private readonly IHardwareSettingsPresenter _settingsPresenter;
     private readonly OperatingModeController _performanceMode;
+    private readonly object _operatingModeStateLock = new();
     private HardwareOperatingMode? _expectedOperatingMode;
 
     /// <summary>Initializes the hotkey dispatcher.</summary>
@@ -114,9 +115,14 @@ internal sealed class HotkeyHandler
 
     private void QueueOperatingModeToggle(CancellationToken cancellationToken)
     {
-        var current = _expectedOperatingMode ?? _performanceMode.CurrentMode;
-        var requested = current.Toggle();
-        _expectedOperatingMode = requested;
+        HardwareOperatingMode requested;
+        lock (_operatingModeStateLock)
+        {
+            var current = _expectedOperatingMode ?? _performanceMode.CurrentMode;
+            requested = current.Toggle();
+            _expectedOperatingMode = requested;
+        }
+
         _statusPublisher.Publish(new OperatingModeStatus(requested));
         _ = ApplyRequestedOperatingModeAsync(requested, cancellationToken);
     }
@@ -150,6 +156,19 @@ internal sealed class HotkeyHandler
                 "Failed to apply ASUS performance/GPU mode {PerformanceMode}/{GpuMode}.",
                 requestedMode.Performance,
                 requestedMode.Gpu);
+        }
+        finally
+        {
+            // Keep the expected value only while a burst of hotkey transitions is queued. Once
+            // the latest request completes, future presses must start from controller state so an
+            // operating mode selected through the settings UI cannot be shadowed by stale state.
+            lock (_operatingModeStateLock)
+            {
+                if (_expectedOperatingMode == requestedMode)
+                {
+                    _expectedOperatingMode = null;
+                }
+            }
         }
     }
 }

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using AsusHardwareService.Asus.Performance;
 using AsusHardwareService.Settings;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -52,6 +53,13 @@ internal sealed class MutableHardwareSettingsStore
         if (patch.BatteryChargeLimitPercent is { } chargeLimit)
         {
             hardware["ChargeLimit"] = chargeLimit;
+        }
+
+        if (patch.OperatingMode is { } operatingMode)
+        {
+            var hardwareMode = HardwareOperatingMode.FromPreset(operatingMode);
+            hardware["PerformanceMode"] = hardwareMode.Performance.ToString();
+            hardware["GpuMode"] = hardwareMode.Gpu.ToString();
         }
 
         var json = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine;

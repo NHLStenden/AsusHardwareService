@@ -1,4 +1,5 @@
 using AsusHardwareService.Asus.Battery;
+using AsusHardwareService.Asus.Performance;
 using AsusHardwareService.Configuration;
 using AsusHardwareService.Settings;
 using Microsoft.Extensions.Logging;
@@ -25,6 +26,7 @@ internal sealed class HardwareSettingsCoordinator : IDisposable
 {
     private readonly ILogger<HardwareSettingsCoordinator> _logger;
     private readonly BatteryChargeLimiter _batteryChargeLimiter;
+    private readonly OperatingModeController _operatingModeController;
     private readonly MutableHardwareSettingsStore _settingsStore;
     private readonly SemaphoreSlim _updateLock = new(1, 1);
     private readonly IDisposable? _optionsSubscription;
@@ -34,11 +36,13 @@ internal sealed class HardwareSettingsCoordinator : IDisposable
     public HardwareSettingsCoordinator(
         ILogger<HardwareSettingsCoordinator> logger,
         BatteryChargeLimiter batteryChargeLimiter,
+        OperatingModeController operatingModeController,
         MutableHardwareSettingsStore settingsStore,
         IOptionsMonitor<HardwareOptions> options)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _batteryChargeLimiter = batteryChargeLimiter ?? throw new ArgumentNullException(nameof(batteryChargeLimiter));
+        _operatingModeController = operatingModeController ?? throw new ArgumentNullException(nameof(operatingModeController));
         _settingsStore = settingsStore ?? throw new ArgumentNullException(nameof(settingsStore));
         ArgumentNullException.ThrowIfNull(options);
 
@@ -62,7 +66,8 @@ internal sealed class HardwareSettingsCoordinator : IDisposable
                 chargeLimit,
                 BatteryChargeLimitPolicy.MinimumPercent,
                 BatteryChargeLimitPolicy.MaximumPercent,
-                BatteryChargeLimitPolicy.StepPercent));
+                BatteryChargeLimitPolicy.StepPercent),
+            _operatingModeController.CurrentMode.ToPreset());
     }
 
     /// <summary>Validates, persists, and applies a partial user settings update.</summary>
@@ -87,6 +92,11 @@ internal sealed class HardwareSettingsCoordinator : IDisposable
                 $"{BatteryChargeLimitPolicy.MaximumPercent}% in {BatteryChargeLimitPolicy.StepPercent}% steps.");
         }
 
+        if (patch.OperatingMode is { } operatingMode && !Enum.IsDefined(typeof(OperatingModePreset), operatingMode))
+        {
+            return Failure("Unsupported operating mode.");
+        }
+
         await _updateLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -94,19 +104,44 @@ internal sealed class HardwareSettingsCoordinator : IDisposable
             // service startup will retry the durable user selection.
             await _settingsStore.UpdateAsync(patch, cancellationToken).ConfigureAwait(false);
 
+            var chargeLimitApplied = true;
             if (patch.BatteryChargeLimitPercent is { } requestedChargeLimit)
             {
                 Interlocked.Exchange(ref _batteryChargeLimitPercent, requestedChargeLimit);
-                if (!_batteryChargeLimiter.ApplyLimit(requestedChargeLimit))
+                chargeLimitApplied = _batteryChargeLimiter.ApplyLimit(requestedChargeLimit);
+                if (!chargeLimitApplied)
                 {
                     _logger.LogWarning(
                         "Battery charge limit {Limit}% was persisted but could not be applied immediately.",
                         requestedChargeLimit);
-                    return Failure("Saved, but the charge limit could not be applied.");
                 }
             }
 
-            return Success();
+            var operatingModeApplied = true;
+            if (patch.OperatingMode is { } requestedOperatingMode)
+            {
+                var hardwareMode = HardwareOperatingMode.FromPreset(requestedOperatingMode);
+                operatingModeApplied = await _operatingModeController
+                    .ApplyAsync(hardwareMode, cancellationToken)
+                    .ConfigureAwait(false);
+                if (!operatingModeApplied)
+                {
+                    _logger.LogWarning(
+                        "Operating mode {OperatingMode} was persisted but could not be applied immediately.",
+                        requestedOperatingMode);
+                }
+            }
+
+            if (chargeLimitApplied && operatingModeApplied)
+            {
+                return Success();
+            }
+
+            return Failure(patch.BatteryChargeLimitPercent.HasValue && patch.OperatingMode.HasValue
+                ? "Saved; some settings were not applied."
+                : chargeLimitApplied
+                    ? "Saved; operating mode was not applied."
+                    : "Saved; charge limit was not applied.");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -115,7 +150,7 @@ internal sealed class HardwareSettingsCoordinator : IDisposable
         catch (Exception exception)
         {
             _logger.LogError(exception, "Failed to update user-adjustable hardware settings.");
-            return Failure("The charge limit could not be saved.");
+            return Failure("The hardware settings could not be saved.");
         }
         finally
         {

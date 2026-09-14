@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using AsusHardwareService.Asus.Performance;
 using AsusHardwareService.Presentation.Osd;
 using AsusHardwareService.Settings;
 using static AsusHardwareService.Presentation.Osd.OsdNativeMethods;
@@ -12,6 +13,7 @@ internal static class SettingsFlyoutWindow
     private const string WindowClassName = "AsusHardwareService.SettingsFlyoutWindow";
     private const int ArrowCursorId = 32512;
     private const int DwmwaTransitionsForcedDisabled = 3;
+    private const int VkTab = 0x09;
     private const uint WmReadCompleted = WmApp + 0x72;
     private const uint WmUpdateCompleted = WmApp + 0x73;
     private const uint WmFlyoutAnimationFrame = WmApp + 0x74;
@@ -30,10 +32,16 @@ internal static class SettingsFlyoutWindow
     private static int _maximum = 100;
     private static int _step = 5;
     private static int _committedValue = 60;
+    private static OperatingModePreset? _operatingMode;
+    private static OperatingModePreset? _committedOperatingMode;
+    private static OperatingModePreset? _hoveredOperatingMode;
+    private static OperatingModePreset? _pressedOperatingMode;
+    private static SettingsFlyoutFocusedControl _focusedControl = SettingsFlyoutFocusedControl.BatteryChargeLimit;
     private static bool _isAvailable;
     private static bool _isLoading;
     private static bool _isApplying;
     private static bool _isDragging;
+    private static bool _trackingMouseLeave;
     private static bool _showFocusVisual;
     private static bool _closeAfterOperation;
     private static bool _animationActive;
@@ -71,7 +79,7 @@ internal static class SettingsFlyoutWindow
         _windowHandle = CreateWindowEx(
             WsExTopmost | WsExToolWindow,
             WindowClassName,
-            "Battery charge limit",
+            "ASUS hardware settings",
             WsPopup,
             0,
             0,
@@ -150,17 +158,46 @@ internal static class SettingsFlyoutWindow
                 if (CanEdit() && IsPointInSlider(window, GetMouseX(lParam), GetMouseY(lParam)))
                 {
                     KillTimer(window, ApplyDebounceTimerId);
+                    _focusedControl = SettingsFlyoutFocusedControl.BatteryChargeLimit;
+                    _hoveredOperatingMode = null;
                     _isDragging = true;
                     SetCapture(window);
                     UpdateValueFromMouse(window, GetMouseX(lParam));
                     InvalidateRect(window, IntPtr.Zero, false);
+                    return IntPtr.Zero;
+                }
+
+                if (CanEdit() &&
+                    TryGetOperatingModeAtPoint(window, GetMouseX(lParam), GetMouseY(lParam), out var operatingMode))
+                {
+                    KillTimer(window, ApplyDebounceTimerId);
+                    _focusedControl = SettingsFlyoutFocusedControl.OperatingMode;
+                    _hoveredOperatingMode = operatingMode;
+                    _pressedOperatingMode = operatingMode;
+                    EnsureMouseLeaveTracking(window);
+                    SetCapture(window);
+                    InvalidateRect(window, IntPtr.Zero, false);
+                    return IntPtr.Zero;
                 }
                 return IntPtr.Zero;
 
             case WmMouseMove:
+                EnsureMouseLeaveTracking(window);
                 if (_isDragging && CanEdit())
                 {
                     UpdateValueFromMouse(window, GetMouseX(lParam));
+                    return IntPtr.Zero;
+                }
+
+                UpdateOperatingModeHover(window, GetMouseX(lParam), GetMouseY(lParam));
+                return IntPtr.Zero;
+
+            case WmMouseLeave:
+                _trackingMouseLeave = false;
+                if (_hoveredOperatingMode is not null)
+                {
+                    _hoveredOperatingMode = null;
+                    InvalidateRect(window, IntPtr.Zero, false);
                 }
                 return IntPtr.Zero;
 
@@ -175,21 +212,68 @@ internal static class SettingsFlyoutWindow
                         BeginApply(window);
                     }
                     InvalidateRect(window, IntPtr.Zero, false);
+                    return IntPtr.Zero;
+                }
+
+                if (_pressedOperatingMode is { } pressedOperatingMode)
+                {
+                    var shouldCommit = CanEdit() &&
+                        TryGetOperatingModeAtPoint(
+                            window,
+                            GetMouseX(lParam),
+                            GetMouseY(lParam),
+                            out var releasedOperatingMode) &&
+                        releasedOperatingMode == pressedOperatingMode;
+                    _pressedOperatingMode = null;
+                    ReleaseCapture();
+                    UpdateOperatingModeHover(window, GetMouseX(lParam), GetMouseY(lParam));
+                    if (shouldCommit)
+                    {
+                        SetOperatingMode(window, pressedOperatingMode);
+                        BeginApply(window);
+                    }
+                    InvalidateRect(window, IntPtr.Zero, false);
+                }
+                return IntPtr.Zero;
+
+            case WmCaptureChanged:
+                if (_isDragging || _pressedOperatingMode is not null)
+                {
+                    _isDragging = false;
+                    _pressedOperatingMode = null;
+                    InvalidateRect(window, IntPtr.Zero, false);
                 }
                 return IntPtr.Zero;
 
             case WmKeyDown:
-                if ((int)wParam.ToUInt64() == VkEscape)
+                var key = (int)wParam.ToUInt64();
+                if (key == VkEscape)
                 {
                     RequestClose(window, commitPendingChange: false);
                     return IntPtr.Zero;
                 }
 
-                if (CanEdit() && HandleKeyAdjustment(window, (int)wParam.ToUInt64()))
+                if (key == VkTab)
                 {
+                    _focusedControl = _focusedControl == SettingsFlyoutFocusedControl.BatteryChargeLimit
+                        ? SettingsFlyoutFocusedControl.OperatingMode
+                        : SettingsFlyoutFocusedControl.BatteryChargeLimit;
                     _showFocusVisual = true;
                     InvalidateRect(window, IntPtr.Zero, false);
                     return IntPtr.Zero;
+                }
+
+                if (CanEdit())
+                {
+                    var handled = _focusedControl == SettingsFlyoutFocusedControl.BatteryChargeLimit
+                        ? HandleBatteryKeyAdjustment(window, key)
+                        : HandleOperatingModeKeyAdjustment(window, key);
+                    if (handled)
+                    {
+                        _showFocusVisual = true;
+                        InvalidateRect(window, IntPtr.Zero, false);
+                        return IntPtr.Zero;
+                    }
                 }
                 break;
 
@@ -297,7 +381,15 @@ internal static class SettingsFlyoutWindow
 
     private static void BeginApply(IntPtr window)
     {
-        if (!CanEdit() || _value == _committedValue)
+        if (!CanEdit())
+        {
+            return;
+        }
+
+        var chargeLimit = _value != _committedValue ? _value : (int?)null;
+        var operatingMode = _operatingMode != _committedOperatingMode ? _operatingMode : null;
+        var patch = new HardwareSettingsPatch(chargeLimit, operatingMode);
+        if (patch.IsEmpty)
         {
             return;
         }
@@ -305,18 +397,16 @@ internal static class SettingsFlyoutWindow
         KillTimer(window, ApplyDebounceTimerId);
         _isApplying = true;
         _statusText = null;
-        var requestedValue = _value;
         InvalidateRect(window, IntPtr.Zero, false);
-        _ = ApplyAsync(window, requestedValue);
+        _ = ApplyAsync(window, patch);
     }
 
-    private static async Task ApplyAsync(IntPtr window, int requestedValue)
+    private static async Task ApplyAsync(IntPtr window, HardwareSettingsPatch patch)
     {
         HardwareSettingsResponse? response = null;
         try
         {
-            response = await Client.UpdateAsync(
-                new HardwareSettingsPatch(requestedValue)).ConfigureAwait(false);
+            response = await Client.UpdateAsync(patch).ConfigureAwait(false);
         }
         catch
         {
@@ -338,7 +428,7 @@ internal static class SettingsFlyoutWindow
             _isAvailable = true;
             _statusText = response.Success
                 ? null
-                : response.Error ?? "The charge limit could not be applied.";
+                : response.Error ?? "The hardware setting could not be applied.";
         }
         else
         {
@@ -380,9 +470,11 @@ internal static class SettingsFlyoutWindow
         _step = Math.Max(1, setting.Step);
         _committedValue = NormalizeToStep(setting.Value);
         _value = _committedValue;
+        _committedOperatingMode = snapshot.OperatingMode;
+        _operatingMode = _committedOperatingMode;
     }
 
-    private static bool HandleKeyAdjustment(IntPtr window, int key)
+    private static bool HandleBatteryKeyAdjustment(IntPtr window, int key)
     {
         int nextValue;
         switch (key)
@@ -406,6 +498,46 @@ internal static class SettingsFlyoutWindow
         }
 
         SetValue(window, nextValue);
+        KillTimer(window, ApplyDebounceTimerId);
+        SetTimer(window, ApplyDebounceTimerId, ApplyDebounceMilliseconds, IntPtr.Zero);
+        return true;
+    }
+
+    private static bool HandleOperatingModeKeyAdjustment(IntPtr window, int key)
+    {
+        var current = _operatingMode ?? OperatingModePreset.Normal;
+        OperatingModePreset next;
+        switch (key)
+        {
+            case VkLeft:
+            case VkDown:
+                next = current switch
+                {
+                    OperatingModePreset.Turbo => OperatingModePreset.Normal,
+                    OperatingModePreset.Normal => OperatingModePreset.Eco,
+                    _ => OperatingModePreset.Eco,
+                };
+                break;
+            case VkRight:
+            case VkUp:
+                next = current switch
+                {
+                    OperatingModePreset.Eco => OperatingModePreset.Normal,
+                    OperatingModePreset.Normal => OperatingModePreset.Turbo,
+                    _ => OperatingModePreset.Turbo,
+                };
+                break;
+            case VkHome:
+                next = OperatingModePreset.Eco;
+                break;
+            case VkEnd:
+                next = OperatingModePreset.Turbo;
+                break;
+            default:
+                return false;
+        }
+
+        SetOperatingMode(window, next);
         KillTimer(window, ApplyDebounceTimerId);
         SetTimer(window, ApplyDebounceTimerId, ApplyDebounceMilliseconds, IntPtr.Zero);
         return true;
@@ -441,6 +573,18 @@ internal static class SettingsFlyoutWindow
         InvalidateRect(window, IntPtr.Zero, false);
     }
 
+    private static void SetOperatingMode(IntPtr window, OperatingModePreset operatingMode)
+    {
+        if (_operatingMode == operatingMode)
+        {
+            return;
+        }
+
+        _operatingMode = operatingMode;
+        _statusText = null;
+        InvalidateRect(window, IntPtr.Zero, false);
+    }
+
     private static int NormalizeToStep(int value)
     {
         var clamped = Math.Clamp(value, _minimum, _maximum);
@@ -462,6 +606,54 @@ internal static class SettingsFlyoutWindow
         return x >= hit.Left && x <= hit.Right && y >= hit.Top && y <= hit.Bottom;
     }
 
+    private static bool TryGetOperatingModeAtPoint(
+        IntPtr window,
+        int x,
+        int y,
+        out OperatingModePreset operatingMode)
+    {
+        var dpi = GetDpiForWindow(window);
+        if (dpi == 0)
+        {
+            dpi = 96;
+        }
+
+        return SettingsFlyoutLayout.TryGetOperatingModeAtPoint(dpi, x, y, out operatingMode);
+    }
+
+    private static void EnsureMouseLeaveTracking(IntPtr window)
+    {
+        if (_trackingMouseLeave)
+        {
+            return;
+        }
+
+        var tracking = new TrackMouseEventData
+        {
+            cbSize = (uint)Marshal.SizeOf<TrackMouseEventData>(),
+            dwFlags = TmeLeave,
+            hwndTrack = window,
+        };
+        _trackingMouseLeave = TrackMouseEvent(ref tracking);
+    }
+
+    private static void UpdateOperatingModeHover(IntPtr window, int x, int y)
+    {
+        OperatingModePreset? hovered = null;
+        if (CanEdit() && TryGetOperatingModeAtPoint(window, x, y, out var operatingMode))
+        {
+            hovered = operatingMode;
+        }
+
+        if (_hoveredOperatingMode == hovered)
+        {
+            return;
+        }
+
+        _hoveredOperatingMode = hovered;
+        InvalidateRect(window, IntPtr.Zero, false);
+    }
+
     private static bool CanEdit() => _isAvailable && !_isLoading && !_isApplying;
 
     private static SettingsFlyoutViewModel CreateViewModel() =>
@@ -469,21 +661,33 @@ internal static class SettingsFlyoutWindow
             _value,
             _minimum,
             _maximum,
+            _operatingMode,
+            _hoveredOperatingMode,
+            _pressedOperatingMode,
             _isAvailable,
             _isApplying,
             _isDragging,
             _showFocusVisual,
+            _focusedControl,
             _statusText);
 
     private static void RequestClose(IntPtr window, bool commitPendingChange)
     {
-        if (_isDragging)
+        if (_isDragging || _pressedOperatingMode is not null)
         {
             _isDragging = false;
+            _pressedOperatingMode = null;
             ReleaseCapture();
         }
 
-        if (commitPendingChange && CanEdit() && _value != _committedValue)
+        // The HWND is intentionally kept resident after a normal dismissal. Do not carry a stale
+        // pointer-over state into the next keyboard-triggered presentation.
+        _hoveredOperatingMode = null;
+        _trackingMouseLeave = false;
+
+        if (commitPendingChange &&
+            CanEdit() &&
+            (_value != _committedValue || _operatingMode != _committedOperatingMode))
         {
             _closeAfterOperation = true;
             BeginApply(window);
@@ -495,6 +699,7 @@ internal static class SettingsFlyoutWindow
         {
             KillTimer(window, ApplyDebounceTimerId);
             _value = _committedValue;
+            _operatingMode = _committedOperatingMode;
         }
 
         if (_isLoading || _isApplying)
@@ -827,10 +1032,16 @@ internal static class SettingsFlyoutWindow
         _maximum = 100;
         _step = 5;
         _committedValue = 60;
+        _operatingMode = null;
+        _committedOperatingMode = null;
+        _hoveredOperatingMode = null;
+        _pressedOperatingMode = null;
+        _focusedControl = SettingsFlyoutFocusedControl.BatteryChargeLimit;
         _isAvailable = false;
         _isLoading = false;
         _isApplying = false;
         _isDragging = false;
+        _trackingMouseLeave = false;
         _showFocusVisual = false;
         _closeAfterOperation = false;
         _animationActive = false;

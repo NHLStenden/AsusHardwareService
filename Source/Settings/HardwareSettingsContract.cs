@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AsusHardwareService.Asus.Performance;
 
 namespace AsusHardwareService.Settings;
 
@@ -22,21 +23,27 @@ internal sealed record IntegerSettingState(int Value, int Minimum, int Maximum, 
 
 /// <summary>Snapshot of user-adjustable hardware settings.</summary>
 /// <param name="BatteryChargeLimit">The current battery charge-limit state.</param>
+/// <param name="OperatingMode">The current service-observed operating-mode preset, when representable.</param>
 /// <remarks>
 /// Add future user-adjustable properties here rather than creating feature-specific presentation
 /// channels. The service remains authoritative for validation and hardware application.
 /// </remarks>
-internal sealed record HardwareSettingsSnapshot(IntegerSettingState BatteryChargeLimit);
+internal sealed record HardwareSettingsSnapshot(
+    IntegerSettingState BatteryChargeLimit,
+    OperatingModePreset? OperatingMode);
 
 /// <summary>Partial hardware-settings update. Null properties are left unchanged.</summary>
 /// <param name="BatteryChargeLimitPercent">A replacement battery charge ceiling, or <see langword="null"/>.</param>
+/// <param name="OperatingMode">A replacement operating-mode preset, or <see langword="null"/>.</param>
 /// <remarks>
 /// This patch shape deliberately leaves room for additional independently-updatable properties.
 /// </remarks>
-internal sealed record HardwareSettingsPatch(int? BatteryChargeLimitPercent = null)
+internal sealed record HardwareSettingsPatch(
+    int? BatteryChargeLimitPercent = null,
+    OperatingModePreset? OperatingMode = null)
 {
     /// <summary>Gets whether the patch contains no setting changes.</summary>
-    internal bool IsEmpty => !BatteryChargeLimitPercent.HasValue;
+    internal bool IsEmpty => !BatteryChargeLimitPercent.HasValue && !OperatingMode.HasValue;
 }
 
 /// <summary>One request sent from the interactive fly-out to the Windows service.</summary>
@@ -63,10 +70,10 @@ internal sealed record HardwareSettingsResponse(
 internal static class HardwareSettingsProtocol
 {
     /// <summary>Current protocol version.</summary>
-    internal const int Version = 1;
+    internal const int Version = 2;
 
     /// <summary>Local named-pipe endpoint used by interactive presentation processes.</summary>
-    internal const string PipeName = "AsusHardwareService.HardwareSettings.v1";
+    internal const string PipeName = "AsusHardwareService.HardwareSettings.v2";
 
     /// <summary>Maximum accepted request or response length in UTF-16 characters.</summary>
     internal const int MaximumMessageCharacters = 16 * 1024;
