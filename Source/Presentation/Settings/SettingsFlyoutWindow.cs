@@ -46,6 +46,7 @@ internal static class SettingsFlyoutWindow
     private static int _animationLastPresentedY;
     private static int _finalX;
     private static int _finalY;
+    private static int _hideOffScreenY;
     private static string? _statusText;
 
     /// <summary>Creates the fly-out when necessary and activates it in the resident UI process.</summary>
@@ -486,7 +487,7 @@ internal static class SettingsFlyoutWindow
         {
             _closeAfterOperation = true;
             BeginApply(window);
-            ShowWindow(window, SwHide);
+            BeginDismissAnimation(window, destroyAfterAnimation: false);
             return;
         }
 
@@ -499,7 +500,7 @@ internal static class SettingsFlyoutWindow
         if (_isLoading || _isApplying)
         {
             _closeAfterOperation = true;
-            ShowWindow(window, SwHide);
+            BeginDismissAnimation(window, destroyAfterAnimation: false);
             return;
         }
 
@@ -534,7 +535,7 @@ internal static class SettingsFlyoutWindow
             dpi = 96;
         }
 
-        var translation = DipToPx(SettingsFlyoutLayout.EntranceTranslationDip, dpi);
+        var translation = DipToPx(EntranceTranslationDip, dpi);
         BeginFlyoutAnimation(
             window,
             _finalY + translation,
@@ -543,33 +544,36 @@ internal static class SettingsFlyoutWindow
             destroyAfterAnimation: false);
     }
 
-    private static void BeginDismissAnimation(IntPtr window)
+    private static void BeginDismissAnimation(IntPtr window, bool destroyAfterAnimation = true)
     {
         if (!IsWindowVisible(window))
         {
-            PostMessage(window, WmClose, UIntPtr.Zero, IntPtr.Zero);
+            if (destroyAfterAnimation)
+            {
+                PostMessage(window, WmClose, UIntPtr.Zero, IntPtr.Zero);
+            }
             return;
         }
 
         if (!OsdTheme.AnimationsEnabled)
         {
-            PostMessage(window, WmClose, UIntPtr.Zero, IntPtr.Zero);
+            if (destroyAfterAnimation)
+            {
+                PostMessage(window, WmClose, UIntPtr.Zero, IntPtr.Zero);
+            }
+            else
+            {
+                ShowWindow(window, SwHide);
+            }
             return;
         }
 
-        var dpi = GetDpiForWindow(window);
-        if (dpi == 0)
-        {
-            dpi = 96;
-        }
-
-        var translation = DipToPx(SettingsFlyoutLayout.EntranceTranslationDip, dpi);
         BeginFlyoutAnimation(
             window,
             _finalY,
-            _finalY + translation,
+            _hideOffScreenY,
             incoming: false,
-            destroyAfterAnimation: true);
+            destroyAfterAnimation);
     }
 
     private static void BeginFlyoutAnimation(
@@ -656,6 +660,9 @@ internal static class SettingsFlyoutWindow
 
         if (destroy)
         {
+            // Make the last translated position a real presented frame before destroying the HWND.
+            // Otherwise DWM can coalesce the final move with destruction and truncate the exit.
+            DwmFlush();
             PostMessage(window, WmClose, UIntPtr.Zero, IntPtr.Zero);
             return;
         }
@@ -663,7 +670,15 @@ internal static class SettingsFlyoutWindow
         if (incoming)
         {
             SetFlyoutPosition(window, _finalY, show: true);
+            return;
         }
+
+        // A settings update/read may still be completing after light-dismiss. Finish the visual
+        // dismissal now, but keep the HWND alive so its completion message cannot race a reused
+        // window handle. CompleteRead/CompleteUpdate will close it when the operation finishes.
+        DwmFlush();
+        ShowWindow(window, SwHide);
+        SetFlyoutPosition(window, _finalY, show: false);
     }
 
     private static void CancelFlyoutAnimation(IntPtr window)
@@ -795,6 +810,12 @@ internal static class SettingsFlyoutWindow
         // same lower-right work-area edge as Windows Quick Settings instead of the OSD position.
         _finalX = monitorInfo.rcWork.Right - width - margin;
         _finalY = monitorInfo.rcWork.Bottom - height - margin;
+
+        // Match OsdPresenter's taskbar-directed exit. Continue through the physical monitor edge
+        // with enough extra clearance for the rounded shadow/backdrop before hiding the HWND.
+        var offScreenVisualClearance = Math.Max(1, height / 2);
+        _hideOffScreenY = monitorInfo.rcMonitor.Bottom + offScreenVisualClearance;
+
         SetWindowPos(window, HwndTopmost, _finalX, _finalY, width, height, SwpNoActivate);
     }
 
@@ -822,6 +843,7 @@ internal static class SettingsFlyoutWindow
         _animationLastPresentedY = 0;
         _finalX = 0;
         _finalY = 0;
+        _hideOffScreenY = 0;
         _statusText = null;
     }
 

@@ -11,11 +11,10 @@ internal static class SettingsFlyoutLayout
     internal const double WidthDip = 360.0;
     internal const double HeightDip = 108.0;
     internal const double EdgeMarginDip = 12.0;
-    internal const double EntranceTranslationDip = 8.0;
 
     internal static readonly DipRect TitleRect = new(20.0, 12.0, 292.0, 38.0);
     internal static readonly DipRect ValueRect = new(292.0, 12.0, 340.0, 38.0);
-    internal static readonly DipRect BatteryIconRect = new(20.0, 46.0, 44.0, 78.0);
+    internal static readonly DipRect BatteryIconRect = new(20.0, 45.0, 44.0, 77.0);
     internal static readonly DipRect TrackRect = new(56.0, 59.0, 332.0, 63.0);
     internal static readonly DipRect StatusRect = new(56.0, 77.0, 340.0, 101.0);
 

@@ -9,6 +9,8 @@ internal static class SettingsFlyoutRenderer
     private const string TextFontFamily = "Segoe UI Variable Text";
     private const string IconFontFamily = "Segoe Fluent Icons";
     private const string BatteryGlyph = "\uE83F"; // Battery10
+    // Segoe Fluent Icons is optically hinted at 20 DIP; avoid fractional/non-standard glyph sizes.
+    private const double BatteryIconFontSizeDip = 20.0;
 
     /// <summary>Paints the current fly-out state into the supplied window.</summary>
     internal static void Paint(IntPtr window, SettingsFlyoutViewModel model)
@@ -67,7 +69,7 @@ internal static class SettingsFlyoutRenderer
                 BatteryGlyph,
                 SettingsFlyoutLayout.BatteryIconRect,
                 400,
-                17,
+                BatteryIconFontSizeDip,
                 DtCenter,
                 model.IsAvailable ? primary : secondary,
                 IconFontFamily);
