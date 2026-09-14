@@ -42,12 +42,14 @@ builder.Services
     .AddOptions<HardwareOptions>()
     .Bind(builder.Configuration.GetSection(HardwareOptions.SectionName));
 
-// Concrete components are the default. Interfaces are reserved for the two presentation seams where
-// orchestration genuinely benefits from depending on behavior rather than the Win32 OSD implementation.
+// Concrete components are the default. Interfaces are reserved for presentation boundaries where
+// service orchestration benefits from depending on behavior rather than a specific Win32 implementation.
 builder.Services.AddSingleton<AsusAcpiClientFactory>();
 builder.Services.AddSingleton<AsusHotkeyListener>();
 builder.Services.AddSingleton<AsusKeyboardBacklightWriter>();
 builder.Services.AddSingleton<BatteryChargeLimiter>();
+builder.Services.AddSingleton<MutableHardwareSettingsStore>();
+builder.Services.AddSingleton<HardwareSettingsCoordinator>();
 builder.Services.AddSingleton<KeyboardBacklightController>();
 builder.Services.AddSingleton<OperatingModeController>();
 builder.Services.AddSingleton<SplendidProfileApplier>();
@@ -61,11 +63,13 @@ builder.Services.AddSingleton<SessionProcessLauncher>();
 builder.Services.AddSingleton<OsdNotifier>();
 builder.Services.AddSingleton<IHardwareStatusPublisher>(services => services.GetRequiredService<OsdNotifier>());
 builder.Services.AddSingleton<IOnScreenDisplayLifecycle>(services => services.GetRequiredService<OsdNotifier>());
+builder.Services.AddSingleton<IHardwareSettingsPresenter>(services => services.GetRequiredService<OsdNotifier>());
 
 builder.Services.AddSingleton<StartupInitializer>();
 builder.Services.AddSingleton<HotkeyHandler>();
 builder.Services.AddSingleton<SessionMonitor>();
 builder.Services.AddHostedService<HardwareService>();
+builder.Services.AddHostedService<HardwareSettingsPipeServer>();
 
 await builder.Build().RunAsync().ConfigureAwait(false);
 return 0;

@@ -30,13 +30,33 @@ internal sealed class BatteryChargeLimiter
     /// <summary>Starts the ASUS ACPI driver if needed and writes the configured battery charge ceiling.</summary>
     public void ApplyConfiguredLimit()
     {
+        var configuredLimit = _options.CurrentValue.BatteryChargeLimitPercent;
+        var limit = BatteryChargeLimitPolicy.Normalize(configuredLimit);
+        if (limit != configuredLimit)
+        {
+            _logger.LogWarning(
+                "Configured battery charge limit {ConfiguredLimit}% is not user-selectable; using {Limit}%.",
+                configuredLimit,
+                limit);
+        }
+
+        if (!ApplyLimit(limit))
+        {
+            _logger.LogError("Could not apply the configured battery charge limit. Value={Limit}.", limit);
+        }
+    }
+
+    /// <summary>Starts the ASUS ACPI driver if needed and writes a battery charge ceiling.</summary>
+    /// <param name="limit">The requested charge ceiling as a percentage.</param>
+    /// <returns><see langword="true"/> when the ASUS ACPI write succeeds.</returns>
+    public bool ApplyLimit(int limit)
+    {
         try
         {
-            var limit = _options.CurrentValue.BatteryChargeLimitPercent;
-            if (limit is <= 0 or >= 100)
+            if (!BatteryChargeLimitPolicy.IsValid(limit))
             {
-                _logger.LogError("No valid battery charge limit is configured. Value={Limit}.", limit);
-                return;
+                _logger.LogError("Invalid battery charge limit. Value={Limit}.", limit);
+                return false;
             }
 
             EnsureDriverServiceRunning(AsusDriverLocator.DriverServiceName);
@@ -45,7 +65,7 @@ internal sealed class BatteryChargeLimiter
             if (!acpi.IsConnected)
             {
                 _logger.LogError(@"Could not connect to \\.\ATKACPI.");
-                return;
+                return false;
             }
 
             _logger.LogInformation("Setting battery charge limit to {Limit}%.", limit);
@@ -53,14 +73,16 @@ internal sealed class BatteryChargeLimiter
             if (result != 1)
             {
                 _logger.LogError("ASUS ACPI battery-limit write returned {Result}.", result);
-                return;
+                return false;
             }
 
             _logger.LogInformation("Battery charge limit set to {Limit}%.", limit);
+            return true;
         }
         catch (Exception exception)
         {
             _logger.LogError(exception, "Fatal error while applying the ASUS battery charge limit.");
+            return false;
         }
     }
 

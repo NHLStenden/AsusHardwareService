@@ -625,7 +625,7 @@ internal static class OsdRenderer
         }
     }
 
-    private static void DrawCompositedTextOnGlass(
+    internal static void DrawCompositedTextOnGlass(
         IntPtr window,
         IntPtr targetDc,
         uint dpi,
@@ -787,7 +787,7 @@ internal static class OsdRenderer
         }
     }
 
-    private static void DrawFilledCapsule(
+    internal static void DrawFilledCapsule(
         IntPtr deviceContext,
         int left,
         int top,

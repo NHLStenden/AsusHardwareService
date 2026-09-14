@@ -1,0 +1,833 @@
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using AsusHardwareService.Presentation.Osd;
+using AsusHardwareService.Settings;
+using static AsusHardwareService.Presentation.Osd.OsdNativeMethods;
+
+namespace AsusHardwareService.Presentation.Settings;
+
+/// <summary>Owns the interactive hardware-settings fly-out window and input behavior.</summary>
+internal static class SettingsFlyoutWindow
+{
+    private const string WindowClassName = "AsusHardwareService.SettingsFlyoutWindow";
+    private const int ArrowCursorId = 32512;
+    private const int DwmwaTransitionsForcedDisabled = 3;
+    private const uint WmReadCompleted = WmApp + 0x72;
+    private const uint WmUpdateCompleted = WmApp + 0x73;
+    private const uint WmFlyoutAnimationFrame = WmApp + 0x74;
+    private static readonly UIntPtr ApplyDebounceTimerId = (UIntPtr)11u;
+    private const uint ApplyDebounceMilliseconds = 350;
+
+    private static readonly WindowProcedureDelegate WindowProcedureCallback = WindowProcedure;
+    private static readonly HardwareSettingsClient Client = new();
+    private static readonly object CompletionLock = new();
+
+    private static bool _classRegistered;
+    private static IntPtr _windowHandle;
+    private static HardwareSettingsResponse? _pendingResponse;
+    private static int _value = 60;
+    private static int _minimum = 60;
+    private static int _maximum = 100;
+    private static int _step = 5;
+    private static int _committedValue = 60;
+    private static bool _isAvailable;
+    private static bool _isLoading;
+    private static bool _isApplying;
+    private static bool _isDragging;
+    private static bool _showFocusVisual;
+    private static bool _closeAfterOperation;
+    private static bool _animationActive;
+    private static bool _animationIncoming;
+    private static bool _destroyAfterAnimation;
+    private static uint _animationGeneration;
+    private static long _animationStartTimestamp;
+    private static int _animationStartY;
+    private static int _animationEndY;
+    private static int _animationLastPresentedY;
+    private static int _finalX;
+    private static int _finalY;
+    private static string? _statusText;
+
+    /// <summary>Creates the fly-out when necessary and activates it in the resident UI process.</summary>
+    /// <returns><see langword="true"/> when the fly-out was shown.</returns>
+    internal static bool Show()
+    {
+        if (_windowHandle != IntPtr.Zero)
+        {
+            CancelFlyoutAnimation(_windowHandle);
+            PositionFlyout(_windowHandle, preferForegroundMonitor: true);
+            ShowAndActivate(_windowHandle);
+            return true;
+        }
+
+        if (!EnsureWindowClass())
+        {
+            return false;
+        }
+
+        ResetState();
+        var moduleHandle = GetModuleHandle(null);
+        _windowHandle = CreateWindowEx(
+            WsExTopmost | WsExToolWindow,
+            WindowClassName,
+            "Battery charge limit",
+            WsPopup,
+            0,
+            0,
+            1,
+            1,
+            IntPtr.Zero,
+            IntPtr.Zero,
+            moduleHandle,
+            IntPtr.Zero);
+        if (_windowHandle == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        OsdTheme.RefreshSystemPreferences();
+        OsdTheme.ConfigureWindows11Appearance(_windowHandle);
+
+        // A generic Win32 popup transition does not match the taskbar fly-outs. Disable DWM's
+        // default window transition for this HWND and use the short Fluent translation below.
+        var transitionsDisabled = 1;
+        DwmSetWindowAttribute(
+            _windowHandle,
+            DwmwaTransitionsForcedDisabled,
+            ref transitionsDisabled,
+            sizeof(int));
+
+        PositionFlyout(_windowHandle, preferForegroundMonitor: true);
+        ShowAndActivate(_windowHandle);
+        BeginRead(_windowHandle);
+        return true;
+    }
+
+    private static bool EnsureWindowClass()
+    {
+        if (_classRegistered)
+        {
+            return true;
+        }
+
+        var windowClass = new WindowClassEx
+        {
+            cbSize = (uint)Marshal.SizeOf<WindowClassEx>(),
+            lpfnWndProc = WindowProcedureCallback,
+            hInstance = GetModuleHandle(null),
+            hCursor = LoadCursor(IntPtr.Zero, new IntPtr(ArrowCursorId)),
+            lpszClassName = WindowClassName,
+        };
+
+        _classRegistered = RegisterClassEx(ref windowClass) != 0;
+        return _classRegistered;
+    }
+
+    private static IntPtr WindowProcedure(IntPtr window, uint message, UIntPtr wParam, IntPtr lParam)
+    {
+        switch (message)
+        {
+            case WmReadCompleted:
+                CompleteRead(window);
+                return IntPtr.Zero;
+
+            case WmUpdateCompleted:
+                CompleteUpdate(window);
+                return IntPtr.Zero;
+
+            case WmFlyoutAnimationFrame:
+                AdvanceFlyoutAnimation(window, (uint)wParam.ToUInt64());
+                return IntPtr.Zero;
+
+            case WmLButtonDown:
+                if (_showFocusVisual)
+                {
+                    _showFocusVisual = false;
+                    InvalidateRect(window, IntPtr.Zero, false);
+                }
+
+                if (CanEdit() && IsPointInSlider(window, GetMouseX(lParam), GetMouseY(lParam)))
+                {
+                    KillTimer(window, ApplyDebounceTimerId);
+                    _isDragging = true;
+                    SetCapture(window);
+                    UpdateValueFromMouse(window, GetMouseX(lParam));
+                    InvalidateRect(window, IntPtr.Zero, false);
+                }
+                return IntPtr.Zero;
+
+            case WmMouseMove:
+                if (_isDragging && CanEdit())
+                {
+                    UpdateValueFromMouse(window, GetMouseX(lParam));
+                }
+                return IntPtr.Zero;
+
+            case WmLButtonUp:
+                if (_isDragging)
+                {
+                    _isDragging = false;
+                    ReleaseCapture();
+                    if (CanEdit())
+                    {
+                        UpdateValueFromMouse(window, GetMouseX(lParam));
+                        BeginApply(window);
+                    }
+                    InvalidateRect(window, IntPtr.Zero, false);
+                }
+                return IntPtr.Zero;
+
+            case WmKeyDown:
+                if ((int)wParam.ToUInt64() == VkEscape)
+                {
+                    RequestClose(window, commitPendingChange: false);
+                    return IntPtr.Zero;
+                }
+
+                if (CanEdit() && HandleKeyAdjustment(window, (int)wParam.ToUInt64()))
+                {
+                    _showFocusVisual = true;
+                    InvalidateRect(window, IntPtr.Zero, false);
+                    return IntPtr.Zero;
+                }
+                break;
+
+            case WmTimer:
+                if (wParam == ApplyDebounceTimerId)
+                {
+                    KillTimer(window, ApplyDebounceTimerId);
+                    BeginApply(window);
+                    return IntPtr.Zero;
+                }
+                break;
+
+            case WmActivate:
+                if ((ushort)(wParam.ToUInt64() & 0xffffu) == WaInactive && IsWindowVisible(window))
+                {
+                    RequestClose(window, commitPendingChange: true);
+                }
+                return IntPtr.Zero;
+
+            case WmSettingChange:
+            case WmSysColorChange:
+                OsdTheme.RefreshSystemPreferences();
+                OsdTheme.ConfigureWindows11Appearance(window);
+                InvalidateRect(window, IntPtr.Zero, false);
+                return IntPtr.Zero;
+
+            case WmDwmCompositionChanged:
+                OsdTheme.ConfigureWindows11Appearance(window);
+                InvalidateRect(window, IntPtr.Zero, false);
+                return IntPtr.Zero;
+
+            case WmDpiChanged:
+                CancelFlyoutAnimation(window);
+                PositionFlyout(window, preferForegroundMonitor: false);
+                InvalidateRect(window, IntPtr.Zero, false);
+                return IntPtr.Zero;
+
+            case WmEraseBackground:
+                return new IntPtr(1);
+
+            case WmPaint:
+                SettingsFlyoutRenderer.Paint(window, CreateViewModel());
+                return IntPtr.Zero;
+
+            case WmClose:
+                KillTimer(window, ApplyDebounceTimerId);
+                StopFlyoutAnimation();
+                DestroyWindow(window);
+                return IntPtr.Zero;
+
+            case WmDestroy:
+                _windowHandle = IntPtr.Zero;
+                return IntPtr.Zero;
+        }
+
+        return DefWindowProc(window, message, wParam, lParam);
+    }
+
+    private static void BeginRead(IntPtr window)
+    {
+        _isLoading = true;
+        _statusText = null;
+        InvalidateRect(window, IntPtr.Zero, false);
+        _ = ReadAsync(window);
+    }
+
+    private static async Task ReadAsync(IntPtr window)
+    {
+        HardwareSettingsResponse? response = null;
+        try
+        {
+            response = await Client.ReadAsync().ConfigureAwait(false);
+        }
+        catch
+        {
+            // Completion is still posted so the UI can show the unavailable state.
+        }
+
+        StoreCompletion(response);
+        PostMessage(window, WmReadCompleted, UIntPtr.Zero, IntPtr.Zero);
+    }
+
+    private static void CompleteRead(IntPtr window)
+    {
+        var response = TakeCompletion();
+        _isLoading = false;
+        if (response is not null && response.Success)
+        {
+            ApplySnapshot(response.Settings);
+            _isAvailable = true;
+            _statusText = null;
+        }
+        else
+        {
+            _isAvailable = false;
+            _statusText = response?.Error ?? "Service unavailable.";
+        }
+
+        InvalidateRect(window, IntPtr.Zero, false);
+        if (_closeAfterOperation)
+        {
+            PostMessage(window, WmClose, UIntPtr.Zero, IntPtr.Zero);
+        }
+    }
+
+    private static void BeginApply(IntPtr window)
+    {
+        if (!CanEdit() || _value == _committedValue)
+        {
+            return;
+        }
+
+        KillTimer(window, ApplyDebounceTimerId);
+        _isApplying = true;
+        _statusText = null;
+        var requestedValue = _value;
+        InvalidateRect(window, IntPtr.Zero, false);
+        _ = ApplyAsync(window, requestedValue);
+    }
+
+    private static async Task ApplyAsync(IntPtr window, int requestedValue)
+    {
+        HardwareSettingsResponse? response = null;
+        try
+        {
+            response = await Client.UpdateAsync(
+                new HardwareSettingsPatch(requestedValue)).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Completion is still posted so the UI can show the unavailable state.
+        }
+
+        StoreCompletion(response);
+        PostMessage(window, WmUpdateCompleted, UIntPtr.Zero, IntPtr.Zero);
+    }
+
+    private static void CompleteUpdate(IntPtr window)
+    {
+        var response = TakeCompletion();
+        _isApplying = false;
+
+        if (response is not null)
+        {
+            ApplySnapshot(response.Settings);
+            _isAvailable = true;
+            _statusText = response.Success
+                ? null
+                : response.Error ?? "The charge limit could not be applied.";
+        }
+        else
+        {
+            _value = _committedValue;
+            _isAvailable = false;
+            _statusText = "Service unavailable.";
+        }
+
+        InvalidateRect(window, IntPtr.Zero, false);
+        if (_closeAfterOperation)
+        {
+            PostMessage(window, WmClose, UIntPtr.Zero, IntPtr.Zero);
+        }
+    }
+
+    private static void StoreCompletion(HardwareSettingsResponse? response)
+    {
+        lock (CompletionLock)
+        {
+            _pendingResponse = response;
+        }
+    }
+
+    private static HardwareSettingsResponse? TakeCompletion()
+    {
+        lock (CompletionLock)
+        {
+            var response = _pendingResponse;
+            _pendingResponse = null;
+            return response;
+        }
+    }
+
+    private static void ApplySnapshot(HardwareSettingsSnapshot snapshot)
+    {
+        var setting = snapshot.BatteryChargeLimit;
+        _minimum = setting.Minimum;
+        _maximum = setting.Maximum;
+        _step = Math.Max(1, setting.Step);
+        _committedValue = NormalizeToStep(setting.Value);
+        _value = _committedValue;
+    }
+
+    private static bool HandleKeyAdjustment(IntPtr window, int key)
+    {
+        int nextValue;
+        switch (key)
+        {
+            case VkLeft:
+            case VkDown:
+                nextValue = _value - _step;
+                break;
+            case VkRight:
+            case VkUp:
+                nextValue = _value + _step;
+                break;
+            case VkHome:
+                nextValue = _minimum;
+                break;
+            case VkEnd:
+                nextValue = _maximum;
+                break;
+            default:
+                return false;
+        }
+
+        SetValue(window, nextValue);
+        KillTimer(window, ApplyDebounceTimerId);
+        SetTimer(window, ApplyDebounceTimerId, ApplyDebounceMilliseconds, IntPtr.Zero);
+        return true;
+    }
+
+    private static void UpdateValueFromMouse(IntPtr window, int mouseX)
+    {
+        var dpi = GetDpiForWindow(window);
+        if (dpi == 0)
+        {
+            dpi = 96;
+        }
+
+        var track = OsdLayout.ToPixels(SettingsFlyoutLayout.TrackRect, dpi);
+        var width = Math.Max(1, track.Right - track.Left);
+        var progress = Math.Clamp((mouseX - track.Left) / (double)width, 0.0, 1.0);
+        var rawValue = _minimum + ((_maximum - _minimum) * progress);
+        var steppedValue = _minimum +
+            ((int)Math.Round((rawValue - _minimum) / _step, MidpointRounding.AwayFromZero) * _step);
+        SetValue(window, steppedValue);
+    }
+
+    private static void SetValue(IntPtr window, int value)
+    {
+        var normalized = NormalizeToStep(value);
+        if (_value == normalized)
+        {
+            return;
+        }
+
+        _value = normalized;
+        _statusText = null;
+        InvalidateRect(window, IntPtr.Zero, false);
+    }
+
+    private static int NormalizeToStep(int value)
+    {
+        var clamped = Math.Clamp(value, _minimum, _maximum);
+        var stepIndex = (int)Math.Round(
+            (clamped - _minimum) / (double)Math.Max(1, _step),
+            MidpointRounding.AwayFromZero);
+        return Math.Clamp(_minimum + (stepIndex * Math.Max(1, _step)), _minimum, _maximum);
+    }
+
+    private static bool IsPointInSlider(IntPtr window, int x, int y)
+    {
+        var dpi = GetDpiForWindow(window);
+        if (dpi == 0)
+        {
+            dpi = 96;
+        }
+
+        var hit = SettingsFlyoutLayout.GetSliderHitRect(dpi);
+        return x >= hit.Left && x <= hit.Right && y >= hit.Top && y <= hit.Bottom;
+    }
+
+    private static bool CanEdit() => _isAvailable && !_isLoading && !_isApplying;
+
+    private static SettingsFlyoutViewModel CreateViewModel() =>
+        new(
+            _value,
+            _minimum,
+            _maximum,
+            _isAvailable,
+            _isApplying,
+            _isDragging,
+            _showFocusVisual,
+            _statusText);
+
+    private static void RequestClose(IntPtr window, bool commitPendingChange)
+    {
+        if (_isDragging)
+        {
+            _isDragging = false;
+            ReleaseCapture();
+        }
+
+        if (commitPendingChange && CanEdit() && _value != _committedValue)
+        {
+            _closeAfterOperation = true;
+            BeginApply(window);
+            ShowWindow(window, SwHide);
+            return;
+        }
+
+        if (!commitPendingChange && CanEdit())
+        {
+            KillTimer(window, ApplyDebounceTimerId);
+            _value = _committedValue;
+        }
+
+        if (_isLoading || _isApplying)
+        {
+            _closeAfterOperation = true;
+            ShowWindow(window, SwHide);
+            return;
+        }
+
+        BeginDismissAnimation(window);
+    }
+
+    private static void ShowAndActivate(IntPtr window)
+    {
+        _closeAfterOperation = false;
+        CancelFlyoutAnimation(window);
+
+        if (OsdTheme.AnimationsEnabled && !IsWindowVisible(window))
+        {
+            StartShowAnimation(window);
+        }
+        else
+        {
+            SetFlyoutPosition(window, _finalY, show: true);
+            ShowWindow(window, SwShow);
+        }
+
+        SetForegroundWindow(window);
+        SetFocus(window);
+        InvalidateRect(window, IntPtr.Zero, false);
+    }
+
+    private static void StartShowAnimation(IntPtr window)
+    {
+        var dpi = GetDpiForWindow(window);
+        if (dpi == 0)
+        {
+            dpi = 96;
+        }
+
+        var translation = DipToPx(SettingsFlyoutLayout.EntranceTranslationDip, dpi);
+        BeginFlyoutAnimation(
+            window,
+            _finalY + translation,
+            _finalY,
+            incoming: true,
+            destroyAfterAnimation: false);
+    }
+
+    private static void BeginDismissAnimation(IntPtr window)
+    {
+        if (!IsWindowVisible(window))
+        {
+            PostMessage(window, WmClose, UIntPtr.Zero, IntPtr.Zero);
+            return;
+        }
+
+        if (!OsdTheme.AnimationsEnabled)
+        {
+            PostMessage(window, WmClose, UIntPtr.Zero, IntPtr.Zero);
+            return;
+        }
+
+        var dpi = GetDpiForWindow(window);
+        if (dpi == 0)
+        {
+            dpi = 96;
+        }
+
+        var translation = DipToPx(SettingsFlyoutLayout.EntranceTranslationDip, dpi);
+        BeginFlyoutAnimation(
+            window,
+            _finalY,
+            _finalY + translation,
+            incoming: false,
+            destroyAfterAnimation: true);
+    }
+
+    private static void BeginFlyoutAnimation(
+        IntPtr window,
+        int startY,
+        int endY,
+        bool incoming,
+        bool destroyAfterAnimation)
+    {
+        _animationGeneration = unchecked(_animationGeneration + 1u);
+        if (_animationGeneration == 0u)
+        {
+            _animationGeneration = 1u;
+        }
+
+        _animationStartY = startY;
+        _animationEndY = endY;
+        _animationLastPresentedY = startY;
+        _animationIncoming = incoming;
+        _destroyAfterAnimation = destroyAfterAnimation;
+        _animationActive = true;
+
+        SetFlyoutPosition(window, startY, show: true);
+        UpdateWindow(window);
+        if (DwmFlush() < 0)
+        {
+            FinishFlyoutAnimation(window);
+            return;
+        }
+
+        _animationStartTimestamp = Stopwatch.GetTimestamp();
+        PostMessage(window, WmFlyoutAnimationFrame, new UIntPtr(_animationGeneration), IntPtr.Zero);
+    }
+
+    private static void AdvanceFlyoutAnimation(IntPtr window, uint generation)
+    {
+        if (!_animationActive || generation != _animationGeneration)
+        {
+            return;
+        }
+
+        var elapsedTicks = Stopwatch.GetTimestamp() - _animationStartTimestamp;
+        var durationTicks = Stopwatch.Frequency * (ControlFastAnimationDurationMilliseconds / 1000.0);
+        var progress = durationTicks <= 0.0
+            ? 1.0
+            : Math.Clamp(elapsedTicks / durationTicks, 0.0, 1.0);
+        var easedProgress = _animationIncoming
+            ? EaseDirectEntrance(progress)
+            : EaseGentleExit(progress);
+        var y = (int)Math.Round(
+            _animationStartY + ((_animationEndY - _animationStartY) * easedProgress));
+        if (y != _animationLastPresentedY)
+        {
+            MoveFlyout(window, y);
+            _animationLastPresentedY = y;
+        }
+
+        if (progress >= 1.0)
+        {
+            FinishFlyoutAnimation(window);
+            return;
+        }
+
+        if (DwmFlush() < 0)
+        {
+            FinishFlyoutAnimation(window);
+            return;
+        }
+
+        PostMessage(window, WmFlyoutAnimationFrame, new UIntPtr(generation), IntPtr.Zero);
+    }
+
+    private static void FinishFlyoutAnimation(IntPtr window)
+    {
+        if (!_animationActive)
+        {
+            return;
+        }
+
+        MoveFlyout(window, _animationEndY);
+        var destroy = _destroyAfterAnimation;
+        var incoming = _animationIncoming;
+        StopFlyoutAnimation();
+
+        if (destroy)
+        {
+            PostMessage(window, WmClose, UIntPtr.Zero, IntPtr.Zero);
+            return;
+        }
+
+        if (incoming)
+        {
+            SetFlyoutPosition(window, _finalY, show: true);
+        }
+    }
+
+    private static void CancelFlyoutAnimation(IntPtr window)
+    {
+        if (!_animationActive)
+        {
+            return;
+        }
+
+        StopFlyoutAnimation();
+        SetFlyoutPosition(window, _finalY, show: true);
+    }
+
+    private static void StopFlyoutAnimation()
+    {
+        _animationGeneration = unchecked(_animationGeneration + 1u);
+        _animationActive = false;
+        _animationIncoming = false;
+        _destroyAfterAnimation = false;
+    }
+
+    private static double EaseDirectEntrance(double progress)
+    {
+        if (progress <= 0.0)
+        {
+            return 0.0;
+        }
+
+        if (progress >= 1.0)
+        {
+            return 1.0;
+        }
+
+        // Fluent direct-entrance/exit curve cubic-bezier(0, 0, 0, 1). With both x control
+        // points at zero, x=t^3, so the parameter can be recovered with a cube root.
+        var parameter = Math.Cbrt(progress);
+        return (3.0 * parameter * parameter) - (2.0 * progress);
+    }
+
+    private static double EaseGentleExit(double progress)
+    {
+        if (progress <= 0.0)
+        {
+            return 0.0;
+        }
+
+        if (progress >= 1.0)
+        {
+            return 1.0;
+        }
+
+        // Fluent Gentle Exit uses cubic-bezier(1, 0, 1, 1). It is the motion-only exit
+        // variant, avoiding a synthetic whole-window alpha fade that would break Acrylic.
+        var parameter = 1.0 - Math.Cbrt(1.0 - progress);
+        return (3.0 * parameter * parameter) -
+            (2.0 * parameter * parameter * parameter);
+    }
+
+    private static void SetFlyoutPosition(IntPtr window, int y, bool show)
+    {
+        SetWindowPos(
+            window,
+            HwndTopmost,
+            _finalX,
+            y,
+            0,
+            0,
+            SwpNoSize | SwpNoActivate | (show ? SwpShowWindow : 0u));
+    }
+
+    private static void MoveFlyout(IntPtr window, int y)
+    {
+        SetWindowPos(
+            window,
+            IntPtr.Zero,
+            _finalX,
+            y,
+            0,
+            0,
+            SwpNoSize | SwpNoZOrder | SwpNoActivate);
+    }
+
+    private static void PositionFlyout(IntPtr window, bool preferForegroundMonitor)
+    {
+        var targetWindow = preferForegroundMonitor ? GetForegroundWindow() : window;
+        if (targetWindow == IntPtr.Zero)
+        {
+            targetWindow = window;
+        }
+
+        var monitor = MonitorFromWindow(targetWindow, MonitorDefaultToNearest);
+        var monitorInfo = new MonitorInfo
+        {
+            cbSize = (uint)Marshal.SizeOf<MonitorInfo>(),
+        };
+        if (monitor == IntPtr.Zero || !GetMonitorInfo(monitor, ref monitorInfo))
+        {
+            monitor = MonitorFromWindow(window, MonitorDefaultToPrimary);
+            monitorInfo.cbSize = (uint)Marshal.SizeOf<MonitorInfo>();
+            if (monitor == IntPtr.Zero || !GetMonitorInfo(monitor, ref monitorInfo))
+            {
+                return;
+            }
+        }
+
+        if (!IsWindowVisible(window))
+        {
+            SetWindowPos(
+                window,
+                HwndTopmost,
+                monitorInfo.rcWork.Left,
+                monitorInfo.rcWork.Top,
+                1,
+                1,
+                SwpNoActivate);
+        }
+
+        var dpi = GetDpiForWindow(window);
+        if (dpi == 0)
+        {
+            dpi = 96;
+        }
+
+        var width = DipToPx(SettingsFlyoutLayout.WidthDip, dpi);
+        var height = DipToPx(SettingsFlyoutLayout.HeightDip, dpi);
+        var margin = DipToPx(SettingsFlyoutLayout.EdgeMarginDip, dpi);
+
+        // Unlike the configurable hardware OSD, this is taskbar-adjacent UI. Anchor it to the
+        // same lower-right work-area edge as Windows Quick Settings instead of the OSD position.
+        _finalX = monitorInfo.rcWork.Right - width - margin;
+        _finalY = monitorInfo.rcWork.Bottom - height - margin;
+        SetWindowPos(window, HwndTopmost, _finalX, _finalY, width, height, SwpNoActivate);
+    }
+
+    private static void ResetState()
+    {
+        _pendingResponse = null;
+        _value = 60;
+        _minimum = 60;
+        _maximum = 100;
+        _step = 5;
+        _committedValue = 60;
+        _isAvailable = false;
+        _isLoading = false;
+        _isApplying = false;
+        _isDragging = false;
+        _showFocusVisual = false;
+        _closeAfterOperation = false;
+        _animationActive = false;
+        _animationIncoming = false;
+        _destroyAfterAnimation = false;
+        _animationGeneration = unchecked(_animationGeneration + 1u);
+        _animationStartTimestamp = 0;
+        _animationStartY = 0;
+        _animationEndY = 0;
+        _animationLastPresentedY = 0;
+        _finalX = 0;
+        _finalY = 0;
+        _statusText = null;
+    }
+
+    private static int GetMouseX(IntPtr lParam) =>
+        unchecked((short)(lParam.ToInt64() & 0xffff));
+
+    private static int GetMouseY(IntPtr lParam) =>
+        unchecked((short)((lParam.ToInt64() >> 16) & 0xffff));
+}

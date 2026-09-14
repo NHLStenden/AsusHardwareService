@@ -9,7 +9,7 @@ namespace AsusHardwareService.Presentation.Osd;
 /// <summary>
 /// Publishes hardware state by launching or notifying the resident Win32 on-screen display in the active user session.
 /// </summary>
-internal sealed class OsdNotifier : IHardwareStatusPublisher, IOnScreenDisplayLifecycle
+internal sealed class OsdNotifier : IHardwareStatusPublisher, IOnScreenDisplayLifecycle, IHardwareSettingsPresenter
 {
     private readonly ILogger<OsdNotifier> _logger;
     private readonly UserSessionService _interactiveSessions;
@@ -62,6 +62,36 @@ internal sealed class OsdNotifier : IHardwareStatusPublisher, IOnScreenDisplayLi
 
             default:
                 throw new ArgumentOutOfRangeException(nameof(status), status, "Unsupported hardware status type.");
+        }
+    }
+
+    /// <inheritdoc />
+    public void Show()
+    {
+        var session = _interactiveSessions.GetActiveSession();
+        if (session is null)
+        {
+            _logger.LogDebug("Skipping hardware-settings fly-out because no active interactive user session is available.");
+            return;
+        }
+
+        var executablePath = ResolveCurrentExecutablePath();
+        if (string.IsNullOrWhiteSpace(executablePath) || !File.Exists(executablePath))
+        {
+            _logger.LogWarning("Could not resolve the current executable path for the hardware-settings fly-out.");
+            return;
+        }
+
+        if (!_processLauncher.TryStart(
+                session.SessionId,
+                executablePath,
+                $"{OsdCommand.CommandName} {OsdCommand.SettingsCommandName}",
+                _logger,
+                createConsoleWindow: false))
+        {
+            _logger.LogWarning(
+                "Failed to show the hardware-settings fly-out in session {SessionId}.",
+                session.SessionId);
         }
     }
 

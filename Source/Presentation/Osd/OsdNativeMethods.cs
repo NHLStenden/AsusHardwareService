@@ -20,12 +20,17 @@ internal static class OsdNativeMethods
     internal const int ErrorSuccess = 0;
 
     internal const uint WmDestroy = 0x0002;
+    internal const uint WmActivate = 0x0006;
     internal const uint WmClose = 0x0010;
     internal const uint WmSettingChange = 0x001A;
     internal const uint WmSysColorChange = 0x0015;
     internal const uint WmEraseBackground = 0x0014;
     internal const uint WmPaint = 0x000F;
+    internal const uint WmKeyDown = 0x0100;
     internal const uint WmTimer = 0x0113;
+    internal const uint WmMouseMove = 0x0200;
+    internal const uint WmLButtonDown = 0x0201;
+    internal const uint WmLButtonUp = 0x0202;
     internal const uint WmMouseActivate = 0x0021;
     internal const uint WmPrintClient = 0x0318;
     internal const uint WmDwmCompositionChanged = 0x031E;
@@ -36,11 +41,15 @@ internal static class OsdNativeMethods
     internal const uint WmDisplayBrightnessChanged = WmApp + 0x33;
     internal const uint WmPerformanceGpuChanged = WmApp + 0x34;
     internal const uint WmAnimationFrame = WmApp + 0x35;
+    internal const uint WmShowHardwareSettings = WmApp + 0x36;
 
+    internal const int WaInactive = 0;
     internal const int MaNoActivate = 3;
     internal const int SwHide = 0;
     internal const int SwShowNoActivate = 4;
+    internal const int SwShow = 5;
     internal const uint SwpNoSize = 0x0001;
+    internal const uint SwpNoMove = 0x0002;
     internal const uint SwpNoZOrder = 0x0004;
     internal const uint SwpNoActivate = 0x0010;
     internal const uint SwpShowWindow = 0x0040;
@@ -49,6 +58,14 @@ internal static class OsdNativeMethods
     internal const uint WsExTopmost = 0x00000008;
     internal const uint WsExToolWindow = 0x00000080;
     internal const uint WsExNoActivate = 0x08000000;
+
+    internal const int VkLeft = 0x25;
+    internal const int VkUp = 0x26;
+    internal const int VkRight = 0x27;
+    internal const int VkDown = 0x28;
+    internal const int VkHome = 0x24;
+    internal const int VkEnd = 0x23;
+    internal const int VkEscape = 0x1B;
 
     internal const uint MonitorDefaultToPrimary = 0x00000001;
     internal const uint MonitorDefaultToNearest = 0x00000002;
@@ -96,6 +113,7 @@ internal static class OsdNativeMethods
     internal const int Transparent = 1;
     internal const uint DtLeft = 0x00000000;
     internal const uint DtCenter = 0x00000001;
+    internal const uint DtRight = 0x00000002;
     internal const uint DtVCenter = 0x00000004;
     internal const uint DtSingleLine = 0x00000020;
     internal const int PsSolid = 0;
@@ -227,6 +245,9 @@ internal static class OsdNativeMethods
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     internal static extern ushort RegisterClassEx(ref WindowClassEx windowClass);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern IntPtr LoadCursor(IntPtr instance, IntPtr cursorName);
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     internal static extern IntPtr CreateWindowEx(
         uint extendedStyle,
@@ -306,6 +327,18 @@ internal static class OsdNativeMethods
 
     [DllImport("user32.dll")]
     internal static extern bool ShowWindow(IntPtr window, int command);
+
+    [DllImport("user32.dll")]
+    internal static extern bool SetForegroundWindow(IntPtr window);
+
+    [DllImport("user32.dll")]
+    internal static extern IntPtr SetFocus(IntPtr window);
+
+    [DllImport("user32.dll")]
+    internal static extern IntPtr SetCapture(IntPtr window);
+
+    [DllImport("user32.dll")]
+    internal static extern bool ReleaseCapture();
 
     [DllImport("user32.dll")]
     internal static extern bool UpdateWindow(IntPtr window);

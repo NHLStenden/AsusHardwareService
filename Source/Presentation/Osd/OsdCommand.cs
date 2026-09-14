@@ -56,6 +56,11 @@ internal static class OsdCommand
     public const string ShutdownCommandName = "shutdown";
 
     /// <summary>
+    /// Subcommand used to show the interactive hardware-settings fly-out.
+    /// </summary>
+    public const string SettingsCommandName = "settings";
+
+    /// <summary>
     /// Subcommand used for microphone mute status updates.
     /// </summary>
     public const string MicrophoneCommandName = "mic";
@@ -90,6 +95,7 @@ internal static class OsdCommand
         }
 
         OnScreenDisplayNotification? notification = null;
+        var showSettings = false;
         if (args.Length > 1)
         {
             if (args[1].Equals(ShutdownCommandName, StringComparison.OrdinalIgnoreCase))
@@ -98,13 +104,22 @@ internal static class OsdCommand
                 return true;
             }
 
-            if (args.Length < 3)
+            if (args[1].Equals(SettingsCommandName, StringComparison.OrdinalIgnoreCase))
+            {
+                if (args.Length != 2)
+                {
+                    exitCode = 2;
+                    return true;
+                }
+
+                showSettings = true;
+            }
+            else if (args.Length < 3)
             {
                 exitCode = 2;
                 return true;
             }
-
-            if (args[1].Equals(MicrophoneCommandName, StringComparison.OrdinalIgnoreCase))
+            else if (args[1].Equals(MicrophoneCommandName, StringComparison.OrdinalIgnoreCase))
             {
                 var muted = args[2].ToLowerInvariant() switch
                 {
@@ -166,7 +181,7 @@ internal static class OsdCommand
             }
         }
 
-        exitCode = OsdWindow.Run(notification);
+        exitCode = OsdWindow.Run(notification, showSettings);
         return true;
     }
 }

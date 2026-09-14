@@ -10,7 +10,16 @@ internal static class OsdWindow
     /// </summary>
     /// <param name="initialNotification">An optional hardware status to show immediately.</param>
     /// <returns>A process exit code.</returns>
-    public static int Run(OnScreenDisplayNotification? initialNotification)
+    public static int Run(OnScreenDisplayNotification? initialNotification) =>
+        Run(initialNotification, showSettings: false);
+
+    /// <summary>
+    /// Runs UI mode and optionally opens the interactive hardware-settings fly-out.
+    /// </summary>
+    /// <param name="initialNotification">An optional hardware status to show immediately.</param>
+    /// <param name="showSettings">Whether to open the interactive hardware-settings fly-out.</param>
+    /// <returns>A process exit code.</returns>
+    public static int Run(OnScreenDisplayNotification? initialNotification, bool showSettings)
     {
         var mutexHandle = CreateMutex(IntPtr.Zero, false, InstanceMutexName);
         var mutexLastError = Marshal.GetLastWin32Error();
@@ -29,6 +38,11 @@ internal static class OsdWindow
                     return 3;
                 }
 
+                if (showSettings)
+                {
+                    return OsdHost.SendSettingsRequest(existingWindow) ? 0 : 4;
+                }
+
                 if (initialNotification.HasValue)
                 {
                     return OsdHost.SendNotification(existingWindow, initialNotification.Value) ? 0 : 4;
@@ -45,7 +59,7 @@ internal static class OsdWindow
                 return 0;
             }
 
-            return OsdHost.RunMessageLoop(initialNotification);
+            return OsdHost.RunMessageLoop(initialNotification, showSettings);
         }
         finally
         {

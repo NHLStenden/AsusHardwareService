@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using AsusHardwareService.Presentation.Settings;
 using static AsusHardwareService.Presentation.Osd.OsdNativeMethods;
 
 namespace AsusHardwareService.Presentation.Osd;
@@ -17,7 +18,7 @@ internal static class OsdHost
     private static readonly WindowProcedureDelegate WindowProcedureCallback = WindowProcedure;
     private static IntPtr _windowHandle;
 
-    internal static int RunMessageLoop(OnScreenDisplayNotification? initialNotification)
+    internal static int RunMessageLoop(OnScreenDisplayNotification? initialNotification, bool showSettings)
     {
         var moduleHandle = GetModuleHandle(null);
         var windowClass = new WindowClassEx
@@ -59,6 +60,11 @@ internal static class OsdHost
         if (initialNotification.HasValue)
         {
             PostNotification(_windowHandle, initialNotification.Value);
+        }
+
+        if (showSettings)
+        {
+            PostMessage(_windowHandle, WmShowHardwareSettings, UIntPtr.Zero, IntPtr.Zero);
         }
 
         while (GetMessage(out var message, IntPtr.Zero, 0, 0) > 0)
@@ -112,6 +118,10 @@ internal static class OsdHost
                         performanceGpuMode);
                     OsdPresenter.ShowStatusWindow(window);
                 }
+                return IntPtr.Zero;
+
+            case WmShowHardwareSettings:
+                SettingsFlyoutWindow.Show();
                 return IntPtr.Zero;
 
             case WmTimer:
@@ -289,6 +299,19 @@ internal static class OsdHost
         }
 
         PostMessage(window, message, (UIntPtr)(uint)notification.Value, IntPtr.Zero);
+    }
+
+    /// <summary>Requests that the resident UI opens its interactive hardware-settings fly-out.</summary>
+    internal static bool SendSettingsRequest(IntPtr window)
+    {
+        return SendMessageTimeout(
+            window,
+            WmShowHardwareSettings,
+            UIntPtr.Zero,
+            IntPtr.Zero,
+            0x0002,
+            500,
+            out _) != IntPtr.Zero;
     }
 
     internal static bool SendNotification(IntPtr window, OnScreenDisplayNotification notification)

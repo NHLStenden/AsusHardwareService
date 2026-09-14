@@ -19,6 +19,7 @@ internal sealed class HotkeyHandler
     private readonly KeyboardBacklightController _keyboardBacklight;
     private readonly MicrophoneMuteController _microphoneMute;
     private readonly IHardwareStatusPublisher _statusPublisher;
+    private readonly IHardwareSettingsPresenter _settingsPresenter;
     private readonly OperatingModeController _performanceMode;
     private HardwareOperatingMode? _expectedOperatingMode;
 
@@ -30,6 +31,7 @@ internal sealed class HotkeyHandler
         KeyboardBacklightController keyboardBacklight,
         MicrophoneMuteController microphoneMute,
         IHardwareStatusPublisher statusPublisher,
+        IHardwareSettingsPresenter settingsPresenter,
         OperatingModeController performanceMode)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -38,6 +40,7 @@ internal sealed class HotkeyHandler
         _keyboardBacklight = keyboardBacklight ?? throw new ArgumentNullException(nameof(keyboardBacklight));
         _microphoneMute = microphoneMute ?? throw new ArgumentNullException(nameof(microphoneMute));
         _statusPublisher = statusPublisher ?? throw new ArgumentNullException(nameof(statusPublisher));
+        _settingsPresenter = settingsPresenter ?? throw new ArgumentNullException(nameof(settingsPresenter));
         _performanceMode = performanceMode ?? throw new ArgumentNullException(nameof(performanceMode));
     }
 
@@ -84,9 +87,7 @@ internal sealed class HotkeyHandler
                     break;
 
                 case AsusHotkey.VendorApplicationKey:
-                    _logger.LogDebug(
-                        "Ignoring ASUS HID event {EventId}: the model-dependent vendor application key has no service-owned state.",
-                        hotkeyEvent.RawEventId);
+                    _settingsPresenter.Show();
                     break;
 
                 case AsusHotkey.Unknown:

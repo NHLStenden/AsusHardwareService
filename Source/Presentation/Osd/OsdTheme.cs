@@ -37,6 +37,17 @@ internal static class OsdTheme
         return _isDarkTheme ? Rgb(255, 255, 255) : Rgb(28, 28, 28);
     }
 
+    internal static uint GetSecondaryTextColor()
+    {
+        if (_highContrast)
+        {
+            return GetSysColor(ColorWindowText);
+        }
+
+        // Approximate WinUI TextFillColorSecondaryBrush on the fly-out fallback surface.
+        return _isDarkTheme ? Rgb(201, 201, 201) : Rgb(92, 92, 92);
+    }
+
     internal static uint GetLevelTrackArgb()
     {
         if (_highContrast)
