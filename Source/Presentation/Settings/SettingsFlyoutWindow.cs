@@ -17,6 +17,7 @@ internal static class SettingsFlyoutWindow
     private const uint WmReadCompleted = WmApp + 0x72;
     private const uint WmUpdateCompleted = WmApp + 0x73;
     private const uint WmFlyoutAnimationFrame = WmApp + 0x74;
+    private const uint WmLightDismiss = WmApp + 0x75;
     private static readonly UIntPtr ApplyDebounceTimerId = (UIntPtr)11u;
     private const uint ApplyDebounceMilliseconds = 350;
 
@@ -44,6 +45,7 @@ internal static class SettingsFlyoutWindow
     private static bool _trackingMouseLeave;
     private static bool _showFocusVisual;
     private static bool _closeAfterOperation;
+    private static bool _isDismissing;
     private static bool _animationActive;
     private static bool _animationIncoming;
     private static bool _destroyAfterAnimation;
@@ -148,22 +150,32 @@ internal static class SettingsFlyoutWindow
                 AdvanceFlyoutAnimation(window, (uint)wParam.ToUInt64());
                 return IntPtr.Zero;
 
+            case WmLightDismiss:
+                if (IsWindowVisible(window))
+                {
+                    RequestClose(window, commitPendingChange: true);
+                }
+                return IntPtr.Zero;
+
             case WmLButtonDown:
                 if (_showFocusVisual)
                 {
+                    var previouslyFocusedControl = _focusedControl;
                     _showFocusVisual = false;
-                    InvalidateRect(window, IntPtr.Zero, false);
+                    InvalidateFocusVisual(window, previouslyFocusedControl);
                 }
 
                 if (CanEdit() && IsPointInSlider(window, GetMouseX(lParam), GetMouseY(lParam)))
                 {
                     KillTimer(window, ApplyDebounceTimerId);
                     _focusedControl = SettingsFlyoutFocusedControl.BatteryChargeLimit;
+                    var hoveredModeBeforeSliderInteraction = _hoveredOperatingMode;
                     _hoveredOperatingMode = null;
                     _isDragging = true;
                     SetCapture(window);
                     UpdateValueFromMouse(window, GetMouseX(lParam));
-                    InvalidateRect(window, IntPtr.Zero, false);
+                    InvalidateOperatingModeTile(window, hoveredModeBeforeSliderInteraction);
+                    InvalidateDipRect(window, SettingsFlyoutLayout.SliderVisualRect);
                     return IntPtr.Zero;
                 }
 
@@ -172,11 +184,13 @@ internal static class SettingsFlyoutWindow
                 {
                     KillTimer(window, ApplyDebounceTimerId);
                     _focusedControl = SettingsFlyoutFocusedControl.OperatingMode;
+                    var hoveredModeBeforePress = _hoveredOperatingMode;
                     _hoveredOperatingMode = operatingMode;
                     _pressedOperatingMode = operatingMode;
                     EnsureMouseLeaveTracking(window);
                     SetCapture(window);
-                    InvalidateRect(window, IntPtr.Zero, false);
+                    InvalidateOperatingModeTile(window, hoveredModeBeforePress);
+                    InvalidateOperatingModeTile(window, operatingMode);
                     return IntPtr.Zero;
                 }
                 return IntPtr.Zero;
@@ -194,10 +208,10 @@ internal static class SettingsFlyoutWindow
 
             case WmMouseLeave:
                 _trackingMouseLeave = false;
-                if (_hoveredOperatingMode is not null)
+                if (_hoveredOperatingMode is { } previouslyHoveredMode)
                 {
                     _hoveredOperatingMode = null;
-                    InvalidateRect(window, IntPtr.Zero, false);
+                    InvalidateOperatingModeTile(window, previouslyHoveredMode);
                 }
                 return IntPtr.Zero;
 
@@ -211,7 +225,7 @@ internal static class SettingsFlyoutWindow
                         UpdateValueFromMouse(window, GetMouseX(lParam));
                         BeginApply(window);
                     }
-                    InvalidateRect(window, IntPtr.Zero, false);
+                    InvalidateDipRect(window, SettingsFlyoutLayout.SliderVisualRect);
                     return IntPtr.Zero;
                 }
 
@@ -227,21 +241,27 @@ internal static class SettingsFlyoutWindow
                     _pressedOperatingMode = null;
                     ReleaseCapture();
                     UpdateOperatingModeHover(window, GetMouseX(lParam), GetMouseY(lParam));
+                    InvalidateOperatingModeTile(window, pressedOperatingMode);
                     if (shouldCommit)
                     {
                         SetOperatingMode(window, pressedOperatingMode);
                         BeginApply(window);
                     }
-                    InvalidateRect(window, IntPtr.Zero, false);
                 }
                 return IntPtr.Zero;
 
             case WmCaptureChanged:
                 if (_isDragging || _pressedOperatingMode is not null)
                 {
+                    var wasDragging = _isDragging;
+                    var previouslyPressedMode = _pressedOperatingMode;
                     _isDragging = false;
                     _pressedOperatingMode = null;
-                    InvalidateRect(window, IntPtr.Zero, false);
+                    if (wasDragging)
+                    {
+                        InvalidateDipRect(window, SettingsFlyoutLayout.SliderVisualRect);
+                    }
+                    InvalidateOperatingModeTile(window, previouslyPressedMode);
                 }
                 return IntPtr.Zero;
 
@@ -255,11 +275,17 @@ internal static class SettingsFlyoutWindow
 
                 if (key == VkTab)
                 {
+                    var previouslyFocusedControl = _focusedControl;
+                    var focusWasVisible = _showFocusVisual;
                     _focusedControl = _focusedControl == SettingsFlyoutFocusedControl.BatteryChargeLimit
                         ? SettingsFlyoutFocusedControl.OperatingMode
                         : SettingsFlyoutFocusedControl.BatteryChargeLimit;
                     _showFocusVisual = true;
-                    InvalidateRect(window, IntPtr.Zero, false);
+                    if (focusWasVisible)
+                    {
+                        InvalidateFocusVisual(window, previouslyFocusedControl);
+                    }
+                    InvalidateFocusVisual(window, _focusedControl);
                     return IntPtr.Zero;
                 }
 
@@ -270,8 +296,12 @@ internal static class SettingsFlyoutWindow
                         : HandleOperatingModeKeyAdjustment(window, key);
                     if (handled)
                     {
+                        var focusWasVisible = _showFocusVisual;
                         _showFocusVisual = true;
-                        InvalidateRect(window, IntPtr.Zero, false);
+                        if (!focusWasVisible)
+                        {
+                            InvalidateFocusVisual(window, _focusedControl);
+                        }
                         return IntPtr.Zero;
                     }
                 }
@@ -320,11 +350,14 @@ internal static class SettingsFlyoutWindow
 
             case WmClose:
                 KillTimer(window, ApplyDebounceTimerId);
+                SettingsFlyoutLightDismiss.Stop();
                 StopFlyoutAnimation();
                 DestroyWindow(window);
                 return IntPtr.Zero;
 
             case WmDestroy:
+                SettingsFlyoutLightDismiss.Stop();
+                SettingsFlyoutRenderer.DestroyBackBuffer();
                 _windowHandle = IntPtr.Zero;
                 return IntPtr.Zero;
         }
@@ -396,8 +429,12 @@ internal static class SettingsFlyoutWindow
 
         KillTimer(window, ApplyDebounceTimerId);
         _isApplying = true;
+        var hadStatusText = !string.IsNullOrWhiteSpace(_statusText);
         _statusText = null;
-        InvalidateRect(window, IntPtr.Zero, false);
+        if (hadStatusText)
+        {
+            InvalidateDipRect(window, SettingsFlyoutLayout.StatusRect);
+        }
         _ = ApplyAsync(window, patch);
     }
 
@@ -569,8 +606,14 @@ internal static class SettingsFlyoutWindow
         }
 
         _value = normalized;
+        var hadStatusText = !string.IsNullOrWhiteSpace(_statusText);
         _statusText = null;
-        InvalidateRect(window, IntPtr.Zero, false);
+        InvalidateDipRect(window, SettingsFlyoutLayout.ValueRect);
+        InvalidateDipRect(window, SettingsFlyoutLayout.SliderVisualRect);
+        if (hadStatusText)
+        {
+            InvalidateDipRect(window, SettingsFlyoutLayout.StatusRect);
+        }
     }
 
     private static void SetOperatingMode(IntPtr window, OperatingModePreset operatingMode)
@@ -580,9 +623,16 @@ internal static class SettingsFlyoutWindow
             return;
         }
 
+        var previousOperatingMode = _operatingMode;
         _operatingMode = operatingMode;
+        var hadStatusText = !string.IsNullOrWhiteSpace(_statusText);
         _statusText = null;
-        InvalidateRect(window, IntPtr.Zero, false);
+        InvalidateOperatingModeTile(window, previousOperatingMode);
+        InvalidateOperatingModeTile(window, operatingMode);
+        if (hadStatusText)
+        {
+            InvalidateDipRect(window, SettingsFlyoutLayout.StatusRect);
+        }
     }
 
     private static int NormalizeToStep(int value)
@@ -650,8 +700,56 @@ internal static class SettingsFlyoutWindow
             return;
         }
 
+        var previouslyHoveredMode = _hoveredOperatingMode;
         _hoveredOperatingMode = hovered;
-        InvalidateRect(window, IntPtr.Zero, false);
+        InvalidateOperatingModeTile(window, previouslyHoveredMode);
+        InvalidateOperatingModeTile(window, hovered);
+    }
+
+    /// <summary>Invalidates only the stateful surface of one operating-mode action tile.</summary>
+    private static void InvalidateOperatingModeTile(IntPtr window, OperatingModePreset? operatingMode)
+    {
+        if (operatingMode is not { } mode)
+        {
+            return;
+        }
+
+        var rect = SettingsFlyoutLayout.GetOperatingModeRect(mode);
+        InvalidateDipRect(
+            window,
+            new DipRect(rect.Left - 1.0, rect.Top - 1.0, rect.Right + 1.0, rect.Bottom + 1.0));
+    }
+
+    /// <summary>Invalidates the currently visible keyboard focus cue without repainting the fly-out.</summary>
+    private static void InvalidateFocusVisual(IntPtr window, SettingsFlyoutFocusedControl control)
+    {
+        if (control == SettingsFlyoutFocusedControl.BatteryChargeLimit)
+        {
+            InvalidateDipRect(window, SettingsFlyoutLayout.SliderVisualRect);
+            return;
+        }
+
+        InvalidateOperatingModeTile(window, _operatingMode ?? OperatingModePreset.Normal);
+    }
+
+    /// <summary>Invalidates a DPI-independent client rectangle without erasing the Acrylic surface.</summary>
+    private static void InvalidateDipRect(IntPtr window, DipRect dipRect)
+    {
+        var dpi = GetDpiForWindow(window);
+        if (dpi == 0)
+        {
+            dpi = 96;
+        }
+
+        var pixelRect = OsdLayout.ToPixels(dipRect, dpi);
+        var nativeRect = new Rect
+        {
+            Left = pixelRect.Left,
+            Top = pixelRect.Top,
+            Right = pixelRect.Right,
+            Bottom = pixelRect.Bottom,
+        };
+        InvalidateRectArea(window, ref nativeRect, false);
     }
 
     private static bool CanEdit() => _isAvailable && !_isLoading && !_isApplying;
@@ -673,6 +771,14 @@ internal static class SettingsFlyoutWindow
 
     private static void RequestClose(IntPtr window, bool commitPendingChange)
     {
+        if (_isDismissing)
+        {
+            return;
+        }
+
+        _isDismissing = true;
+        SettingsFlyoutLightDismiss.Stop();
+
         if (_isDragging || _pressedOperatingMode is not null)
         {
             _isDragging = false;
@@ -715,6 +821,7 @@ internal static class SettingsFlyoutWindow
     private static void ShowAndActivate(IntPtr window)
     {
         _closeAfterOperation = false;
+        _isDismissing = false;
         CancelFlyoutAnimation(window);
 
         if (OsdTheme.AnimationsEnabled && !IsWindowVisible(window))
@@ -729,6 +836,7 @@ internal static class SettingsFlyoutWindow
 
         SetForegroundWindow(window);
         SetFocus(window);
+        SettingsFlyoutLightDismiss.Start(window, WmLightDismiss);
         InvalidateRect(window, IntPtr.Zero, false);
     }
 
@@ -1044,6 +1152,7 @@ internal static class SettingsFlyoutWindow
         _trackingMouseLeave = false;
         _showFocusVisual = false;
         _closeAfterOperation = false;
+        _isDismissing = false;
         _animationActive = false;
         _animationIncoming = false;
         _destroyAfterAnimation = false;
@@ -1063,4 +1172,9 @@ internal static class SettingsFlyoutWindow
 
     private static int GetMouseY(IntPtr lParam) =>
         unchecked((short)((lParam.ToInt64() >> 16) & 0xffff));
+
+    [DllImport("user32.dll", EntryPoint = "InvalidateRect", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool InvalidateRectArea(IntPtr window, ref Rect rect, bool erase);
+
 }
