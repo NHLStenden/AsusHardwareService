@@ -42,6 +42,10 @@ internal static class SettingsFlyoutWindow
     private static LaptopDisplayMode _committedLaptopDisplayMode = LaptopDisplayMode.Auto;
     private static LaptopDisplayMode? _hoveredLaptopDisplayMode;
     private static LaptopDisplayMode? _pressedLaptopDisplayMode;
+    private static MiniLedMode _miniLedMode = MiniLedMode.MultiZone;
+    private static MiniLedMode _committedMiniLedMode = MiniLedMode.MultiZone;
+    private static MiniLedMode? _hoveredMiniLedMode;
+    private static MiniLedMode? _pressedMiniLedMode;
     private static SettingsFlyoutFocusedControl _focusedControl = SettingsFlyoutFocusedControl.BatteryChargeLimit;
     private static bool _isAvailable;
     private static bool _isLoading;
@@ -217,6 +221,25 @@ internal static class SettingsFlyoutWindow
                     InvalidateLaptopDisplayModeTile(window, laptopDisplayMode);
                     return IntPtr.Zero;
                 }
+
+                if (CanEdit() &&
+                    TryGetMiniLedModeAtPoint(
+                        window,
+                        GetMouseX(lParam),
+                        GetMouseY(lParam),
+                        out var miniLedMode))
+                {
+                    KillTimer(window, ApplyDebounceTimerId);
+                    _focusedControl = SettingsFlyoutFocusedControl.MiniLedMode;
+                    var hoveredMiniLedModeBeforePress = _hoveredMiniLedMode;
+                    _hoveredMiniLedMode = miniLedMode;
+                    _pressedMiniLedMode = miniLedMode;
+                    EnsureMouseLeaveTracking(window);
+                    SetCapture(window);
+                    InvalidateMiniLedModeTile(window, hoveredMiniLedModeBeforePress);
+                    InvalidateMiniLedModeTile(window, miniLedMode);
+                    return IntPtr.Zero;
+                }
                 return IntPtr.Zero;
 
             case WmMouseMove:
@@ -241,6 +264,11 @@ internal static class SettingsFlyoutWindow
                 {
                     _hoveredLaptopDisplayMode = null;
                     InvalidateLaptopDisplayModeTile(window, previouslyHoveredDisplayMode);
+                }
+                if (_hoveredMiniLedMode is { } previouslyHoveredMiniLedMode)
+                {
+                    _hoveredMiniLedMode = null;
+                    InvalidateMiniLedModeTile(window, previouslyHoveredMiniLedMode);
                 }
                 return IntPtr.Zero;
 
@@ -297,23 +325,49 @@ internal static class SettingsFlyoutWindow
                         BeginApply(window);
                     }
                 }
+
+                if (_pressedMiniLedMode is { } pressedMiniLedMode)
+                {
+                    var shouldCommit = CanEdit() &&
+                        TryGetMiniLedModeAtPoint(
+                            window,
+                            GetMouseX(lParam),
+                            GetMouseY(lParam),
+                            out var releasedMiniLedMode) &&
+                        releasedMiniLedMode == pressedMiniLedMode;
+                    _pressedMiniLedMode = null;
+                    ReleaseCapture();
+                    UpdateTileHover(window, GetMouseX(lParam), GetMouseY(lParam));
+                    InvalidateMiniLedModeTile(window, pressedMiniLedMode);
+                    if (shouldCommit)
+                    {
+                        SetMiniLedMode(window, pressedMiniLedMode);
+                        BeginApply(window);
+                    }
+                }
                 return IntPtr.Zero;
 
             case WmCaptureChanged:
-                if (_isDragging || _pressedOperatingMode is not null || _pressedLaptopDisplayMode is not null)
+                if (_isDragging ||
+                    _pressedOperatingMode is not null ||
+                    _pressedLaptopDisplayMode is not null ||
+                    _pressedMiniLedMode is not null)
                 {
                     var wasDragging = _isDragging;
                     var previouslyPressedMode = _pressedOperatingMode;
                     var previouslyPressedDisplayMode = _pressedLaptopDisplayMode;
+                    var previouslyPressedMiniLedMode = _pressedMiniLedMode;
                     _isDragging = false;
                     _pressedOperatingMode = null;
                     _pressedLaptopDisplayMode = null;
+                    _pressedMiniLedMode = null;
                     if (wasDragging)
                     {
                         InvalidateDipRect(window, SettingsFlyoutLayout.SliderVisualRect);
                     }
                     InvalidateOperatingModeTile(window, previouslyPressedMode);
                     InvalidateLaptopDisplayModeTile(window, previouslyPressedDisplayMode);
+                    InvalidateMiniLedModeTile(window, previouslyPressedMiniLedMode);
                 }
                 return IntPtr.Zero;
 
@@ -333,6 +387,7 @@ internal static class SettingsFlyoutWindow
                     {
                         SettingsFlyoutFocusedControl.BatteryChargeLimit => SettingsFlyoutFocusedControl.OperatingMode,
                         SettingsFlyoutFocusedControl.OperatingMode => SettingsFlyoutFocusedControl.LaptopDisplayMode,
+                        SettingsFlyoutFocusedControl.LaptopDisplayMode => SettingsFlyoutFocusedControl.MiniLedMode,
                         _ => SettingsFlyoutFocusedControl.BatteryChargeLimit,
                     };
                     _showFocusVisual = true;
@@ -351,6 +406,7 @@ internal static class SettingsFlyoutWindow
                         SettingsFlyoutFocusedControl.BatteryChargeLimit => HandleBatteryKeyAdjustment(window, key),
                         SettingsFlyoutFocusedControl.OperatingMode => HandleOperatingModeKeyAdjustment(window, key),
                         SettingsFlyoutFocusedControl.LaptopDisplayMode => HandleLaptopDisplayModeKeyAdjustment(window, key),
+                        SettingsFlyoutFocusedControl.MiniLedMode => HandleMiniLedModeKeyAdjustment(window, key),
                         _ => false,
                     };
                     if (handled)
@@ -483,7 +539,10 @@ internal static class SettingsFlyoutWindow
         var laptopDisplayMode = _laptopDisplayMode != _committedLaptopDisplayMode
             ? _laptopDisplayMode
             : (LaptopDisplayMode?)null;
-        var patch = new HardwareSettingsPatch(chargeLimit, operatingMode, laptopDisplayMode);
+        var miniLedMode = _miniLedMode != _committedMiniLedMode
+            ? _miniLedMode
+            : (MiniLedMode?)null;
+        var patch = new HardwareSettingsPatch(chargeLimit, operatingMode, laptopDisplayMode, miniLedMode);
         if (patch.IsEmpty)
         {
             return;
@@ -533,6 +592,7 @@ internal static class SettingsFlyoutWindow
         {
             _value = _committedValue;
             _laptopDisplayMode = _committedLaptopDisplayMode;
+            _miniLedMode = _committedMiniLedMode;
             _isAvailable = false;
             _statusText = "Service unavailable.";
         }
@@ -574,6 +634,8 @@ internal static class SettingsFlyoutWindow
         _operatingMode = _committedOperatingMode;
         _committedLaptopDisplayMode = snapshot.LaptopDisplayMode;
         _laptopDisplayMode = _committedLaptopDisplayMode;
+        _committedMiniLedMode = snapshot.MiniLedMode;
+        _miniLedMode = _committedMiniLedMode;
     }
 
     private static bool HandleBatteryKeyAdjustment(IntPtr window, int key)
@@ -684,6 +746,45 @@ internal static class SettingsFlyoutWindow
         return true;
     }
 
+    private static bool HandleMiniLedModeKeyAdjustment(IntPtr window, int key)
+    {
+        MiniLedMode next;
+        switch (key)
+        {
+            case VkLeft:
+            case VkDown:
+                next = _miniLedMode switch
+                {
+                    MiniLedMode.MultiZoneStrong => MiniLedMode.MultiZone,
+                    MiniLedMode.MultiZone => MiniLedMode.OneZone,
+                    _ => MiniLedMode.OneZone,
+                };
+                break;
+            case VkRight:
+            case VkUp:
+                next = _miniLedMode switch
+                {
+                    MiniLedMode.OneZone => MiniLedMode.MultiZone,
+                    MiniLedMode.MultiZone => MiniLedMode.MultiZoneStrong,
+                    _ => MiniLedMode.MultiZoneStrong,
+                };
+                break;
+            case VkHome:
+                next = MiniLedMode.OneZone;
+                break;
+            case VkEnd:
+                next = MiniLedMode.MultiZoneStrong;
+                break;
+            default:
+                return false;
+        }
+
+        SetMiniLedMode(window, next);
+        KillTimer(window, ApplyDebounceTimerId);
+        SetTimer(window, ApplyDebounceTimerId, ApplyDebounceMilliseconds, IntPtr.Zero);
+        return true;
+    }
+
     private static void UpdateValueFromMouse(IntPtr window, int mouseX)
     {
         var dpi = GetDpiForWindow(window);
@@ -758,6 +859,25 @@ internal static class SettingsFlyoutWindow
         }
     }
 
+    private static void SetMiniLedMode(IntPtr window, MiniLedMode miniLedMode)
+    {
+        if (_miniLedMode == miniLedMode)
+        {
+            return;
+        }
+
+        var previousMiniLedMode = _miniLedMode;
+        _miniLedMode = miniLedMode;
+        var hadStatusText = !string.IsNullOrWhiteSpace(_statusText);
+        _statusText = null;
+        InvalidateMiniLedModeTile(window, previousMiniLedMode);
+        InvalidateMiniLedModeTile(window, miniLedMode);
+        if (hadStatusText)
+        {
+            InvalidateDipRect(window, SettingsFlyoutLayout.StatusRect);
+        }
+    }
+
     private static int NormalizeToStep(int value)
     {
         var clamped = Math.Clamp(value, _minimum, _maximum);
@@ -809,6 +929,17 @@ internal static class SettingsFlyoutWindow
         return SettingsFlyoutLayout.TryGetLaptopDisplayModeAtPoint(dpi, x, y, out laptopDisplayMode);
     }
 
+    private static bool TryGetMiniLedModeAtPoint(IntPtr window, int x, int y, out MiniLedMode miniLedMode)
+    {
+        var dpi = GetDpiForWindow(window);
+        if (dpi == 0)
+        {
+            dpi = 96;
+        }
+
+        return SettingsFlyoutLayout.TryGetMiniLedModeAtPoint(dpi, x, y, out miniLedMode);
+    }
+
     private static void EnsureMouseLeaveTracking(IntPtr window)
     {
         if (_trackingMouseLeave)
@@ -829,6 +960,7 @@ internal static class SettingsFlyoutWindow
     {
         OperatingModePreset? hoveredOperatingMode = null;
         LaptopDisplayMode? hoveredLaptopDisplayMode = null;
+        MiniLedMode? hoveredMiniLedMode = null;
         if (CanEdit())
         {
             if (TryGetOperatingModeAtPoint(window, x, y, out var operatingMode))
@@ -838,6 +970,10 @@ internal static class SettingsFlyoutWindow
             else if (TryGetLaptopDisplayModeAtPoint(window, x, y, out var laptopDisplayMode))
             {
                 hoveredLaptopDisplayMode = laptopDisplayMode;
+            }
+            else if (TryGetMiniLedModeAtPoint(window, x, y, out var miniLedMode))
+            {
+                hoveredMiniLedMode = miniLedMode;
             }
         }
 
@@ -855,6 +991,14 @@ internal static class SettingsFlyoutWindow
             _hoveredLaptopDisplayMode = hoveredLaptopDisplayMode;
             InvalidateLaptopDisplayModeTile(window, previouslyHoveredLaptopDisplayMode);
             InvalidateLaptopDisplayModeTile(window, hoveredLaptopDisplayMode);
+        }
+
+        if (_hoveredMiniLedMode != hoveredMiniLedMode)
+        {
+            var previouslyHoveredMiniLedMode = _hoveredMiniLedMode;
+            _hoveredMiniLedMode = hoveredMiniLedMode;
+            InvalidateMiniLedModeTile(window, previouslyHoveredMiniLedMode);
+            InvalidateMiniLedModeTile(window, hoveredMiniLedMode);
         }
     }
 
@@ -886,6 +1030,20 @@ internal static class SettingsFlyoutWindow
             new DipRect(rect.Left - 1.0, rect.Top - 1.0, rect.Right + 1.0, rect.Bottom + 1.0));
     }
 
+    /// <summary>Invalidates only the stateful surface of one MiniLED action tile.</summary>
+    private static void InvalidateMiniLedModeTile(IntPtr window, MiniLedMode? miniLedMode)
+    {
+        if (miniLedMode is not { } mode)
+        {
+            return;
+        }
+
+        var rect = SettingsFlyoutLayout.GetMiniLedModeRect(mode);
+        InvalidateDipRect(
+            window,
+            new DipRect(rect.Left - 1.0, rect.Top - 1.0, rect.Right + 1.0, rect.Bottom + 1.0));
+    }
+
     /// <summary>Invalidates the currently visible keyboard focus cue without repainting the fly-out.</summary>
     private static void InvalidateFocusVisual(IntPtr window, SettingsFlyoutFocusedControl control)
     {
@@ -899,6 +1057,9 @@ internal static class SettingsFlyoutWindow
                 break;
             case SettingsFlyoutFocusedControl.LaptopDisplayMode:
                 InvalidateLaptopDisplayModeTile(window, _laptopDisplayMode);
+                break;
+            case SettingsFlyoutFocusedControl.MiniLedMode:
+                InvalidateMiniLedModeTile(window, _miniLedMode);
                 break;
         }
     }
@@ -936,6 +1097,9 @@ internal static class SettingsFlyoutWindow
             _laptopDisplayMode,
             _hoveredLaptopDisplayMode,
             _pressedLaptopDisplayMode,
+            _miniLedMode,
+            _hoveredMiniLedMode,
+            _pressedMiniLedMode,
             _isAvailable,
             _isApplying,
             _isDragging,
@@ -953,11 +1117,15 @@ internal static class SettingsFlyoutWindow
         _isDismissing = true;
         SettingsFlyoutLightDismiss.Stop();
 
-        if (_isDragging || _pressedOperatingMode is not null || _pressedLaptopDisplayMode is not null)
+        if (_isDragging ||
+            _pressedOperatingMode is not null ||
+            _pressedLaptopDisplayMode is not null ||
+            _pressedMiniLedMode is not null)
         {
             _isDragging = false;
             _pressedOperatingMode = null;
             _pressedLaptopDisplayMode = null;
+            _pressedMiniLedMode = null;
             ReleaseCapture();
         }
 
@@ -965,13 +1133,15 @@ internal static class SettingsFlyoutWindow
         // pointer-over state into the next keyboard-triggered presentation.
         _hoveredOperatingMode = null;
         _hoveredLaptopDisplayMode = null;
+        _hoveredMiniLedMode = null;
         _trackingMouseLeave = false;
 
         if (commitPendingChange &&
             CanEdit() &&
             (_value != _committedValue ||
              _operatingMode != _committedOperatingMode ||
-             _laptopDisplayMode != _committedLaptopDisplayMode))
+             _laptopDisplayMode != _committedLaptopDisplayMode ||
+             _miniLedMode != _committedMiniLedMode))
         {
             _closeAfterOperation = true;
             BeginApply(window);
@@ -985,6 +1155,7 @@ internal static class SettingsFlyoutWindow
             _value = _committedValue;
             _operatingMode = _committedOperatingMode;
             _laptopDisplayMode = _committedLaptopDisplayMode;
+            _miniLedMode = _committedMiniLedMode;
         }
 
         if (_isLoading || _isApplying)
@@ -1327,6 +1498,10 @@ internal static class SettingsFlyoutWindow
         _committedLaptopDisplayMode = LaptopDisplayMode.Auto;
         _hoveredLaptopDisplayMode = null;
         _pressedLaptopDisplayMode = null;
+        _miniLedMode = MiniLedMode.MultiZone;
+        _committedMiniLedMode = MiniLedMode.MultiZone;
+        _hoveredMiniLedMode = null;
+        _pressedMiniLedMode = null;
         _focusedControl = SettingsFlyoutFocusedControl.BatteryChargeLimit;
         _isAvailable = false;
         _isLoading = false;

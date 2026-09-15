@@ -68,6 +68,11 @@ internal sealed class MutableHardwareSettingsStore
             hardware["LaptopScreenMode"] = laptopDisplayMode.ToString();
         }
 
+        if (patch.MiniLedMode is { } miniLedMode)
+        {
+            hardware["MiniLedMode"] = miniLedMode.ToString();
+        }
+
         var json = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine;
         var temporaryPath = _settingsPath + ".tmp";
         try

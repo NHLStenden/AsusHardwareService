@@ -36,6 +36,7 @@ internal sealed class HardwareSettingsCoordinator : IDisposable
     private readonly IDisposable? _optionsSubscription;
     private int _batteryChargeLimitPercent;
     private int _laptopDisplayMode;
+    private int _miniLedMode;
 
     /// <summary>Initializes the service-owned mutable settings coordinator.</summary>
     public HardwareSettingsCoordinator(
@@ -58,12 +59,14 @@ internal sealed class HardwareSettingsCoordinator : IDisposable
         _batteryChargeLimitPercent = BatteryChargeLimitPolicy.Normalize(
             options.CurrentValue.BatteryChargeLimitPercent);
         _laptopDisplayMode = (int)options.CurrentValue.LaptopDisplayMode;
+        _miniLedMode = (int)options.CurrentValue.MiniLedMode;
         _optionsSubscription = options.OnChange((value, _) =>
         {
             Interlocked.Exchange(
                 ref _batteryChargeLimitPercent,
                 BatteryChargeLimitPolicy.Normalize(value.BatteryChargeLimitPercent));
             Interlocked.Exchange(ref _laptopDisplayMode, (int)value.LaptopDisplayMode);
+            Interlocked.Exchange(ref _miniLedMode, (int)value.MiniLedMode);
         });
     }
 
@@ -79,7 +82,8 @@ internal sealed class HardwareSettingsCoordinator : IDisposable
                 BatteryChargeLimitPolicy.MaximumPercent,
                 BatteryChargeLimitPolicy.StepPercent),
             _operatingModeController.CurrentMode.ToPreset(),
-            (LaptopDisplayMode)Volatile.Read(ref _laptopDisplayMode));
+            (LaptopDisplayMode)Volatile.Read(ref _laptopDisplayMode),
+            (MiniLedMode)Volatile.Read(ref _miniLedMode));
     }
 
     /// <summary>Validates, persists, and applies a partial user settings update.</summary>
@@ -113,6 +117,12 @@ internal sealed class HardwareSettingsCoordinator : IDisposable
             !Enum.IsDefined(typeof(LaptopDisplayMode), laptopDisplayMode))
         {
             return Failure("Unsupported laptop screen mode.");
+        }
+
+        if (patch.MiniLedMode is { } miniLedMode &&
+            !Enum.IsDefined(typeof(MiniLedMode), miniLedMode))
+        {
+            return Failure("Unsupported MiniLED mode.");
         }
 
         await _updateLock.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -165,7 +175,20 @@ internal sealed class HardwareSettingsCoordinator : IDisposable
                 }
             }
 
-            if (chargeLimitApplied && operatingModeApplied && laptopDisplayModeApplied)
+            var miniLedModeApplied = true;
+            if (patch.MiniLedMode is { } requestedMiniLedMode)
+            {
+                Interlocked.Exchange(ref _miniLedMode, (int)requestedMiniLedMode);
+                miniLedModeApplied = _laptopDisplayController.ApplyMiniLedMode(requestedMiniLedMode);
+                if (!miniLedModeApplied)
+                {
+                    _logger.LogWarning(
+                        "MiniLED mode {MiniLedMode} was persisted but could not be applied immediately.",
+                        requestedMiniLedMode);
+                }
+            }
+
+            if (chargeLimitApplied && operatingModeApplied && laptopDisplayModeApplied && miniLedModeApplied)
             {
                 return Success();
             }
@@ -173,7 +196,8 @@ internal sealed class HardwareSettingsCoordinator : IDisposable
             var requestedSettingCount =
                 (patch.BatteryChargeLimitPercent.HasValue ? 1 : 0) +
                 (patch.OperatingMode.HasValue ? 1 : 0) +
-                (patch.LaptopDisplayMode.HasValue ? 1 : 0);
+                (patch.LaptopDisplayMode.HasValue ? 1 : 0) +
+                (patch.MiniLedMode.HasValue ? 1 : 0);
             if (requestedSettingCount > 1)
             {
                 return Failure("Saved; some settings were not applied.");
@@ -183,7 +207,9 @@ internal sealed class HardwareSettingsCoordinator : IDisposable
                 ? "Saved; charge limit was not applied."
                 : !operatingModeApplied
                     ? "Saved; operating mode was not applied."
-                    : "Saved; laptop screen mode was not applied.");
+                    : !laptopDisplayModeApplied
+                        ? "Saved; laptop screen mode was not applied."
+                        : "Saved; MiniLED mode was not applied.");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

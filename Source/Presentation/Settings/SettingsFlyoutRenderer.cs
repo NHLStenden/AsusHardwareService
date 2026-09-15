@@ -16,6 +16,9 @@ internal static class SettingsFlyoutRenderer
     private const string DisplayGlyph = "\uE7F4"; // TVMonitor
     private const string AutoDisplayGlyph = "\uE895"; // Sync
     private const string HighRefreshDisplayGlyph = "\uEC4A"; // SpeedHigh
+    private const string OneZoneGlyph = "\uE706"; // Brightness
+    private const string MultiZoneGlyph = "\uECA5"; // Tiles
+    private const string StrongMiniLedGlyph = "\uE7E6"; // Highlight
     private const int ColorHighlightText = 14;
     // Segoe Fluent Icons is optically hinted at 20 DIP; avoid fractional/non-standard glyph sizes.
     private const double FluentIconFontSizeDip = 20.0;
@@ -180,6 +183,17 @@ internal static class SettingsFlyoutRenderer
         {
             DrawLaptopDisplayModeFocus(deviceContext, dpi, model.LaptopDisplayMode);
         }
+
+        DrawMiniLedModeTile(window, deviceContext, dpi, model, MiniLedMode.OneZone, OneZoneGlyph);
+        DrawMiniLedModeTile(window, deviceContext, dpi, model, MiniLedMode.MultiZone, MultiZoneGlyph);
+        DrawMiniLedModeTile(window, deviceContext, dpi, model, MiniLedMode.MultiZoneStrong, StrongMiniLedGlyph);
+
+        if (model.ShowFocusVisual &&
+            model.IsAvailable &&
+            model.FocusedControl == SettingsFlyoutFocusedControl.MiniLedMode)
+        {
+            DrawMiniLedModeFocus(deviceContext, dpi, model.MiniLedMode);
+        }
     }
 
     private static void DrawForeground(
@@ -263,6 +277,21 @@ internal static class SettingsFlyoutRenderer
             LaptopDisplayMode.Hz240Overdrive,
             "240 Hz + OD");
 
+        DrawTextOnSurface(
+            window,
+            deviceContext,
+            dpi,
+            "MiniLED mode",
+            SettingsFlyoutLayout.MiniLedModeTitleRect,
+            400,
+            14,
+            DtLeft,
+            primary);
+
+        DrawMiniLedModeLabel(window, deviceContext, dpi, model, MiniLedMode.OneZone, "One Zone");
+        DrawMiniLedModeLabel(window, deviceContext, dpi, model, MiniLedMode.MultiZone, "Multi Zone");
+        DrawMiniLedModeLabel(window, deviceContext, dpi, model, MiniLedMode.MultiZoneStrong, "Strong");
+
         // Normal operation is intentionally silent, like Quick Settings. Only exceptional
         // states use the small secondary line; there is no instructional or success copy.
         if (!string.IsNullOrWhiteSpace(model.StatusText))
@@ -294,6 +323,10 @@ internal static class SettingsFlyoutRenderer
             IsVisible(paintDc, OsdLayout.ToPixels(SettingsFlyoutLayout.DisplayAutoLabelRect, dpi)) ||
             IsVisible(paintDc, OsdLayout.ToPixels(SettingsFlyoutLayout.Display60LabelRect, dpi)) ||
             IsVisible(paintDc, OsdLayout.ToPixels(SettingsFlyoutLayout.Display240LabelRect, dpi)) ||
+            IsVisible(paintDc, OsdLayout.ToPixels(SettingsFlyoutLayout.MiniLedModeTitleRect, dpi)) ||
+            IsVisible(paintDc, OsdLayout.ToPixels(SettingsFlyoutLayout.MiniLedOneZoneLabelRect, dpi)) ||
+            IsVisible(paintDc, OsdLayout.ToPixels(SettingsFlyoutLayout.MiniLedMultiZoneLabelRect, dpi)) ||
+            IsVisible(paintDc, OsdLayout.ToPixels(SettingsFlyoutLayout.MiniLedStrongLabelRect, dpi)) ||
             IsVisible(paintDc, OsdLayout.ToPixels(SettingsFlyoutLayout.StatusRect, dpi));
     }
 
@@ -556,6 +589,74 @@ internal static class SettingsFlyoutRenderer
         LaptopDisplayMode laptopDisplayMode)
     {
         var rect = OsdLayout.ToPixels(SettingsFlyoutLayout.GetLaptopDisplayModeRect(laptopDisplayMode), dpi);
+        var inset = DipToPx(2.0, dpi);
+        DrawFocusOutline(
+            deviceContext,
+            rect.Left + inset,
+            rect.Top + inset,
+            rect.Right - inset,
+            rect.Bottom - inset,
+            Math.Max(1, DipToPx(8.0, dpi)),
+            dpi);
+    }
+
+    private static void DrawMiniLedModeTile(
+        IntPtr window,
+        IntPtr deviceContext,
+        uint dpi,
+        SettingsFlyoutViewModel model,
+        MiniLedMode miniLedMode,
+        string glyph)
+    {
+        var rect = OsdLayout.ToPixels(SettingsFlyoutLayout.GetMiniLedModeRect(miniLedMode), dpi);
+        var selected = model.MiniLedMode == miniLedMode;
+        var hovered = model.HoveredMiniLedMode == miniLedMode;
+        var pressed = model.PressedMiniLedMode == miniLedMode && hovered;
+        DrawOperatingModeSurface(
+            deviceContext,
+            dpi,
+            rect,
+            selected,
+            hovered,
+            pressed,
+            model.IsAvailable);
+
+        DrawControlText(
+            window,
+            deviceContext,
+            dpi,
+            glyph,
+            SettingsFlyoutLayout.GetMiniLedModeRect(miniLedMode),
+            400,
+            FluentIconFontSizeDip,
+            DtCenter,
+            GetOperatingModeGlyphColor(selected, pressed, model.IsAvailable),
+            IconFontFamily);
+    }
+
+    private static void DrawMiniLedModeLabel(
+        IntPtr window,
+        IntPtr deviceContext,
+        uint dpi,
+        SettingsFlyoutViewModel model,
+        MiniLedMode miniLedMode,
+        string label)
+    {
+        DrawTextOnSurface(
+            window,
+            deviceContext,
+            dpi,
+            label,
+            SettingsFlyoutLayout.GetMiniLedModeLabelRect(miniLedMode),
+            400,
+            12,
+            DtCenter,
+            model.IsAvailable ? OsdTheme.GetPrimaryTextColor() : OsdTheme.GetSecondaryTextColor());
+    }
+
+    private static void DrawMiniLedModeFocus(IntPtr deviceContext, uint dpi, MiniLedMode miniLedMode)
+    {
+        var rect = OsdLayout.ToPixels(SettingsFlyoutLayout.GetMiniLedModeRect(miniLedMode), dpi);
         var inset = DipToPx(2.0, dpi);
         DrawFocusOutline(
             deviceContext,

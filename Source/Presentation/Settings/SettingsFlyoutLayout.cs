@@ -16,6 +16,9 @@ internal enum SettingsFlyoutFocusedControl
 
     /// <summary>The mutually-exclusive laptop-screen selector.</summary>
     LaptopDisplayMode,
+
+    /// <summary>The mutually-exclusive MiniLED local-dimming selector.</summary>
+    MiniLedMode,
 }
 
 /// <summary>DPI-independent geometry for the interactive Windows 11-style settings fly-out.</summary>
@@ -25,7 +28,7 @@ internal static class SettingsFlyoutLayout
     // Quick Settings tile rhythm, so the fly-out grows vertically rather than compressing labels
     // into command-button rectangles.
     internal const double WidthDip = 360.0;
-    internal const double HeightDip = 328.0;
+    internal const double HeightDip = 438.0;
     internal const double EdgeMarginDip = 12.0;
 
     internal static readonly DipRect TitleRect = new(20.0, 12.0, 292.0, 38.0);
@@ -52,7 +55,15 @@ internal static class SettingsFlyoutLayout
     internal static readonly DipRect DisplayAutoLabelRect = new(20.0, 274.0, 120.0, 298.0);
     internal static readonly DipRect Display60LabelRect = new(130.0, 274.0, 230.0, 298.0);
     internal static readonly DipRect Display240LabelRect = new(240.0, 274.0, 340.0, 298.0);
-    internal static readonly DipRect StatusRect = new(20.0, 304.0, 340.0, 326.0);
+
+    internal static readonly DipRect MiniLedModeTitleRect = new(20.0, 304.0, 340.0, 328.0);
+    internal static readonly DipRect MiniLedOneZoneButtonRect = new(20.0, 332.0, 120.0, 380.0);
+    internal static readonly DipRect MiniLedMultiZoneButtonRect = new(130.0, 332.0, 230.0, 380.0);
+    internal static readonly DipRect MiniLedStrongButtonRect = new(240.0, 332.0, 340.0, 380.0);
+    internal static readonly DipRect MiniLedOneZoneLabelRect = new(20.0, 384.0, 120.0, 408.0);
+    internal static readonly DipRect MiniLedMultiZoneLabelRect = new(130.0, 384.0, 230.0, 408.0);
+    internal static readonly DipRect MiniLedStrongLabelRect = new(240.0, 384.0, 340.0, 408.0);
+    internal static readonly DipRect StatusRect = new(20.0, 414.0, 340.0, 436.0);
 
     /// <summary>Returns a touch-friendly hit target around the visible slider track.</summary>
     internal static PixelRect GetSliderHitRect(uint dpi)
@@ -183,6 +194,57 @@ internal static class SettingsFlyoutLayout
         return new DipRect(tile.Left, tile.Top, tile.Right, label.Bottom);
     }
 
+    /// <summary>Returns the MiniLED local-dimming mode under the supplied client point, when present.</summary>
+    internal static bool TryGetMiniLedModeAtPoint(uint dpi, int x, int y, out MiniLedMode miniLedMode)
+    {
+        if (Contains(OsdLayout.ToPixels(GetMiniLedModeHitRect(MiniLedMode.OneZone), dpi), x, y))
+        {
+            miniLedMode = MiniLedMode.OneZone;
+            return true;
+        }
+
+        if (Contains(OsdLayout.ToPixels(GetMiniLedModeHitRect(MiniLedMode.MultiZone), dpi), x, y))
+        {
+            miniLedMode = MiniLedMode.MultiZone;
+            return true;
+        }
+
+        if (Contains(OsdLayout.ToPixels(GetMiniLedModeHitRect(MiniLedMode.MultiZoneStrong), dpi), x, y))
+        {
+            miniLedMode = MiniLedMode.MultiZoneStrong;
+            return true;
+        }
+
+        miniLedMode = default;
+        return false;
+    }
+
+    /// <summary>Returns the Quick Settings-style action-tile geometry for one MiniLED option.</summary>
+    internal static DipRect GetMiniLedModeRect(MiniLedMode miniLedMode) => miniLedMode switch
+    {
+        MiniLedMode.OneZone => MiniLedOneZoneButtonRect,
+        MiniLedMode.MultiZone => MiniLedMultiZoneButtonRect,
+        MiniLedMode.MultiZoneStrong => MiniLedStrongButtonRect,
+        _ => throw new ArgumentOutOfRangeException(nameof(miniLedMode), miniLedMode, "Unsupported MiniLED mode."),
+    };
+
+    /// <summary>Returns the label geometry beneath one MiniLED action tile.</summary>
+    internal static DipRect GetMiniLedModeLabelRect(MiniLedMode miniLedMode) => miniLedMode switch
+    {
+        MiniLedMode.OneZone => MiniLedOneZoneLabelRect,
+        MiniLedMode.MultiZone => MiniLedMultiZoneLabelRect,
+        MiniLedMode.MultiZoneStrong => MiniLedStrongLabelRect,
+        _ => throw new ArgumentOutOfRangeException(nameof(miniLedMode), miniLedMode, "Unsupported MiniLED mode."),
+    };
+
+    /// <summary>Returns the combined tile-and-label pointer target for one MiniLED action.</summary>
+    internal static DipRect GetMiniLedModeHitRect(MiniLedMode miniLedMode)
+    {
+        var tile = GetMiniLedModeRect(miniLedMode);
+        var label = GetMiniLedModeLabelRect(miniLedMode);
+        return new DipRect(tile.Left, tile.Top, tile.Right, label.Bottom);
+    }
+
     private static bool Contains(PixelRect rect, int x, int y) =>
         x >= rect.Left && x <= rect.Right && y >= rect.Top && y <= rect.Bottom;
 }
@@ -198,6 +260,9 @@ internal readonly record struct SettingsFlyoutViewModel(
     LaptopDisplayMode LaptopDisplayMode,
     LaptopDisplayMode? HoveredLaptopDisplayMode,
     LaptopDisplayMode? PressedLaptopDisplayMode,
+    MiniLedMode MiniLedMode,
+    MiniLedMode? HoveredMiniLedMode,
+    MiniLedMode? PressedMiniLedMode,
     bool IsAvailable,
     bool IsApplying,
     bool IsDragging,

@@ -42,7 +42,7 @@ internal sealed class LaptopDisplayController
             options.MiniLedMode);
 
         ApplyOverdrive(options.LaptopDisplayMode);
-        ApplyMiniLed(options.MiniLedMode);
+        ApplyMiniLedMode(options.MiniLedMode);
     }
 
     /// <summary>Starts the configured refresh-rate helper inside the active interactive user session.</summary>
@@ -157,12 +157,15 @@ internal sealed class LaptopDisplayController
         }
     }
 
-    private void ApplyMiniLed(MiniLedMode mode)
+    /// <summary>Applies one MiniLED local-dimming mode through the supported ASUS firmware endpoint.</summary>
+    /// <param name="mode">The MiniLED local-dimming mode to apply.</param>
+    /// <returns><see langword="true"/> when a supported firmware endpoint accepted the mode.</returns>
+    public bool ApplyMiniLedMode(MiniLedMode mode)
     {
         using var acpi = _acpiFactory.Open();
         if (!acpi.IsConnected)
         {
-            return;
+            return false;
         }
 
         var threeStateValue = ToThreeStateMiniLedValue(mode);
@@ -174,7 +177,7 @@ internal sealed class LaptopDisplayController
                 mode,
                 sleepAfterWrite: true))
         {
-            return;
+            return true;
         }
 
         if (mode == MiniLedMode.MultiZoneStrong)
@@ -192,10 +195,11 @@ internal sealed class LaptopDisplayController
                 mode,
                 sleepAfterWrite: false))
         {
-            return;
+            return true;
         }
 
         _logger.LogWarning("No supported MiniLED ACPI endpoint accepted mode {Mode}.", mode);
+        return false;
     }
 
     private static int ToTwoStateMiniLedValue(MiniLedMode mode) => mode switch
