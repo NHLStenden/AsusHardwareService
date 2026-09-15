@@ -24,6 +24,7 @@ internal static class SettingsFlyoutRenderer
     private static IntPtr _backBufferBits;
     private static int _backBufferWidth;
     private static int _backBufferHeight;
+    private static SettingsFlyoutArgbSurface? _backBufferSurface;
 
     /// <summary>Paints the current fly-out state into the supplied window.</summary>
     internal static void Paint(IntPtr window, SettingsFlyoutViewModel model)
@@ -57,12 +58,13 @@ internal static class SettingsFlyoutRenderer
             if (!EnsureBackBuffer(paintDc, width, height))
             {
                 // Allocation failure is non-fatal. Preserve the original direct-paint path.
-                DrawSurface(paintDc, dpi, ref clientRect, model);
+                DrawSurface(window, paintDc, dpi, ref clientRect, model);
                 DrawForeground(window, paintDc, dpi, model);
                 return;
             }
 
-            DrawSurface(_backBufferDc, dpi, ref clientRect, model);
+            DrawSurface(window, _backBufferDc, dpi, ref clientRect, model);
+            CommitBackBufferPixels();
             var paintForeground = IntersectsForeground(paintDc, dpi);
             if (OsdTheme.HighContrast && paintForeground)
             {
@@ -125,15 +127,24 @@ internal static class SettingsFlyoutRenderer
         _backBufferBits = IntPtr.Zero;
         _backBufferWidth = 0;
         _backBufferHeight = 0;
+        _backBufferSurface = null;
     }
 
     private static void DrawSurface(
+        IntPtr window,
         IntPtr deviceContext,
         uint dpi,
         ref Rect clientRect,
         SettingsFlyoutViewModel model)
     {
-        FillBackground(deviceContext, ref clientRect);
+        if (deviceContext == _backBufferDc && _backBufferSurface is not null)
+        {
+            PrepareBackBufferPixels();
+        }
+        else
+        {
+            FillBackground(deviceContext, ref clientRect);
+        }
         SetBkMode(deviceContext, Transparent);
 
         DrawSlider(deviceContext, dpi, model);
@@ -144,9 +155,9 @@ internal static class SettingsFlyoutRenderer
             DrawSliderFocus(deviceContext, dpi, model);
         }
 
-        DrawOperatingModeTile(deviceContext, dpi, model, OperatingModePreset.Eco, EcoGlyph);
-        DrawOperatingModeTile(deviceContext, dpi, model, OperatingModePreset.Normal, SpeedMediumGlyph);
-        DrawOperatingModeTile(deviceContext, dpi, model, OperatingModePreset.Turbo, SpeedHighGlyph);
+        DrawOperatingModeTile(window, deviceContext, dpi, model, OperatingModePreset.Eco, EcoGlyph);
+        DrawOperatingModeTile(window, deviceContext, dpi, model, OperatingModePreset.Normal, SpeedMediumGlyph);
+        DrawOperatingModeTile(window, deviceContext, dpi, model, OperatingModePreset.Turbo, SpeedHighGlyph);
 
         if (model.ShowFocusVisual &&
             model.IsAvailable &&
@@ -317,13 +328,29 @@ internal static class SettingsFlyoutRenderer
         _backBufferBits = bits;
         _backBufferWidth = width;
         _backBufferHeight = height;
+        _backBufferSurface = new SettingsFlyoutArgbSurface(width, height);
         return true;
     }
+
+    /// <summary>Resets the ARGB composition surface for the current fly-out backdrop mode.</summary>
+    private static void PrepareBackBufferPixels()
+    {
+        if (_backBufferSurface is null)
+        {
+            return;
+        }
+
+        _backBufferSurface.Clear(
+            OsdTheme.SystemBackdropEnabled ? 0u : OsdTheme.GetFallbackSurfaceArgb());
+    }
+
+    /// <summary>Copies the alpha-correct composed frame into the persistent 32-bpp DIB.</summary>
+    private static void CommitBackBufferPixels() => _backBufferSurface?.CopyTo(_backBufferBits);
 
     private static void DrawSlider(IntPtr deviceContext, uint dpi, SettingsFlyoutViewModel model)
     {
         var track = OsdLayout.ToPixels(SettingsFlyoutLayout.TrackRect, dpi);
-        OsdRenderer.DrawFilledCapsule(
+        DrawArgbCapsule(
             deviceContext,
             track.Left,
             track.Top,
@@ -339,7 +366,7 @@ internal static class SettingsFlyoutRenderer
         var thumbCenterX = GetThumbCenterX(track, model);
         if (thumbCenterX > track.Left)
         {
-            OsdRenderer.DrawFilledCapsule(
+            DrawArgbCapsule(
                 deviceContext,
                 track.Left,
                 track.Top,
@@ -366,6 +393,7 @@ internal static class SettingsFlyoutRenderer
     }
 
     private static void DrawOperatingModeTile(
+        IntPtr window,
         IntPtr deviceContext,
         uint dpi,
         SettingsFlyoutViewModel model,
@@ -376,7 +404,7 @@ internal static class SettingsFlyoutRenderer
         var selected = model.OperatingMode == operatingMode;
         var hovered = model.HoveredOperatingMode == operatingMode;
         var pressed = model.PressedOperatingMode == operatingMode && hovered;
-        var surfaceColor = DrawOperatingModeSurface(
+        DrawOperatingModeSurface(
             deviceContext,
             dpi,
             rect,
@@ -384,16 +412,12 @@ internal static class SettingsFlyoutRenderer
             hovered,
             pressed,
             model.IsAvailable);
-        var glyphColor = GetOperatingModeGlyphColor(
-            selected,
-            pressed,
-            model.IsAvailable,
-            surfaceColor);
 
-        // Quick Settings actions keep the icon inside the tile and the text label outside it.
-        // Keeping all stateful pixels inside this opaque surface also lets hover updates repaint
-        // only the tile, without touching Acrylic-backed text elsewhere in the fly-out.
-        DrawOpaqueControlText(
+        // Render the glyph through DTT_COMPOSITED into a temporary alpha surface, then blend that
+        // surface into the persistent fly-out DIB. Ordinary GDI text leaves undefined alpha in a
+        // 32-bpp Acrylic buffer, which is why light-theme icons could disappear in the prior build.
+        DrawControlText(
+            window,
             deviceContext,
             dpi,
             glyph,
@@ -401,7 +425,7 @@ internal static class SettingsFlyoutRenderer
             400,
             FluentIconFontSizeDip,
             DtCenter,
-            glyphColor,
+            GetOperatingModeGlyphColor(selected, pressed, model.IsAvailable),
             IconFontFamily);
     }
 
@@ -474,7 +498,25 @@ internal static class SettingsFlyoutRenderer
         var color = OsdTheme.HighContrast
             ? GetSysColor(ColorHighlight)
             : OsdTheme.GetPrimaryTextColor();
-        var pen = CreatePen(PsSolid, Math.Max(1, DipToPx(2.0, dpi)), color);
+        var thickness = Math.Max(1, DipToPx(2.0, dpi));
+
+        if (deviceContext == _backBufferDc && _backBufferSurface is not null)
+        {
+            // GDI RoundRect receives an ellipse diameter; the alpha rasterizer receives a corner radius.
+            DrawArgbRoundedRectStroke(
+                deviceContext,
+                left,
+                top,
+                right,
+                bottom,
+                Math.Max(1, radius / 2),
+                thickness,
+                ColorRefToOpaqueArgb(color),
+                ColorRefToOpaqueArgb(color));
+            return;
+        }
+
+        var pen = CreatePen(PsSolid, thickness, color);
         if (pen == IntPtr.Zero)
         {
             return;
@@ -515,7 +557,7 @@ internal static class SettingsFlyoutRenderer
         uint argb)
     {
         var half = diameter / 2;
-        OsdRenderer.DrawFilledCapsule(
+        DrawArgbCapsule(
             deviceContext,
             centerX - half,
             centerY - half,
@@ -552,7 +594,124 @@ internal static class SettingsFlyoutRenderer
         return OsdTheme.IsDarkTheme ? 0xFF454545u : 0xFFFFFFFFu;
     }
 
-    private static uint DrawOperatingModeSurface(
+    private static void DrawArgbCapsule(
+        IntPtr deviceContext,
+        int left,
+        int top,
+        int right,
+        int bottom,
+        uint argb)
+    {
+        var radius = Math.Max(1, Math.Min(right - left, bottom - top) / 2);
+        DrawArgbRoundedRect(deviceContext, left, top, right, bottom, radius, argb);
+    }
+
+    /// <summary>
+    /// Draws an antialiased rounded ARGB surface while preserving premultiplied alpha when the
+    /// settings back buffer is used; the direct-paint fallback is flattened over the theme surface.
+    /// </summary>
+    private static void DrawArgbRoundedRect(
+        IntPtr deviceContext,
+        int left,
+        int top,
+        int right,
+        int bottom,
+        int radius,
+        uint argb)
+    {
+        if (right <= left || bottom <= top || (argb >> 24) == 0)
+        {
+            return;
+        }
+
+        if (deviceContext == _backBufferDc && _backBufferSurface is not null)
+        {
+            _backBufferSurface.DrawRoundedRect(left, top, right, bottom, radius, argb);
+            return;
+        }
+
+        var brush = CreateSolidBrush(OsdTheme.CompositeArgbOverFallbackToColorRef(argb));
+        if (brush == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var oldBrush = SelectObject(deviceContext, brush);
+        var oldPen = SelectObject(deviceContext, GetStockObject(NullPen));
+        try
+        {
+            var ellipse = Math.Max(1, radius * 2);
+            RoundRect(deviceContext, left, top, right, bottom, ellipse, ellipse);
+        }
+        finally
+        {
+            SelectObject(deviceContext, oldPen);
+            SelectObject(deviceContext, oldBrush);
+            DeleteObject(brush);
+        }
+    }
+
+    /// <summary>
+    /// Draws the two-tone elevation stroke used by Windows 11 controls without flattening its
+    /// alpha into the Acrylic surface.
+    /// </summary>
+    private static void DrawArgbRoundedRectStroke(
+        IntPtr deviceContext,
+        int left,
+        int top,
+        int right,
+        int bottom,
+        int radius,
+        int thickness,
+        uint topArgb,
+        uint bottomArgb)
+    {
+        if (right <= left || bottom <= top || thickness <= 0 ||
+            (((topArgb | bottomArgb) >> 24) == 0))
+        {
+            return;
+        }
+
+        if (deviceContext == _backBufferDc && _backBufferSurface is not null)
+        {
+            _backBufferSurface.DrawRoundedRectStroke(
+                left,
+                top,
+                right,
+                bottom,
+                radius,
+                thickness,
+                topArgb,
+                bottomArgb);
+            return;
+        }
+
+        var midpointArgb = SettingsFlyoutArgbSurface.LerpArgb(topArgb, bottomArgb, 0.5);
+        var pen = CreatePen(
+            PsSolid,
+            thickness,
+            OsdTheme.CompositeArgbOverFallbackToColorRef(midpointArgb));
+        if (pen == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var oldPen = SelectObject(deviceContext, pen);
+        var oldBrush = SelectObject(deviceContext, GetStockObject(NullBrush));
+        try
+        {
+            var ellipse = Math.Max(1, radius * 2);
+            RoundRect(deviceContext, left, top, right, bottom, ellipse, ellipse);
+        }
+        finally
+        {
+            SelectObject(deviceContext, oldBrush);
+            SelectObject(deviceContext, oldPen);
+            DeleteObject(pen);
+        }
+    }
+
+    private static void DrawOperatingModeSurface(
         IntPtr deviceContext,
         uint dpi,
         PixelRect rect,
@@ -561,53 +720,35 @@ internal static class SettingsFlyoutRenderer
         bool pressed,
         bool isAvailable)
     {
-        var fillArgb = GetOperatingModeTileArgb(selected, hovered, pressed, isAvailable);
-        var fillColor = OsdTheme.CompositeArgbOverFallbackToColorRef(fillArgb);
-        var brush = CreateSolidBrush(fillColor);
-        if (brush == IntPtr.Zero)
-        {
-            return fillColor;
-        }
+        var radius = Math.Max(1, DipToPx(4.0, dpi));
+        DrawArgbRoundedRect(
+            deviceContext,
+            rect.Left,
+            rect.Top,
+            rect.Right,
+            rect.Bottom,
+            radius,
+            GetOperatingModeTileArgb(selected, hovered, pressed, isAvailable));
 
-        var drawStroke = OsdTheme.HighContrast || !selected;
-        var strokeColor = OsdTheme.HighContrast
-            ? selected ? GetSysColor(ColorHighlightText) : GetSysColor(ColorWindowText)
-            : CompositeArgbOverColorRef(
-                GetOperatingModeStrokeArgb(hovered, pressed, isAvailable),
-                fillColor);
-        var pen = drawStroke
-            ? CreatePen(PsSolid, Math.Max(1, DipToPx(1.0, dpi)), strokeColor)
-            : IntPtr.Zero;
-        var oldBrush = SelectObject(deviceContext, brush);
-        var oldPen = pen != IntPtr.Zero
-            ? SelectObject(deviceContext, pen)
-            : SelectObject(deviceContext, GetStockObject(NullPen));
-        try
+        GetOperatingModeStrokeArgb(
+            selected,
+            pressed,
+            isAvailable,
+            out var topStrokeArgb,
+            out var bottomStrokeArgb);
+        if (((topStrokeArgb | bottomStrokeArgb) >> 24) != 0)
         {
-            // Match the compact rounded Quick Settings tile silhouette rather than a pill.
-            // An 8-DIP ellipse gives a 4-DIP logical corner radius to GDI RoundRect.
-            var cornerEllipse = Math.Max(1, DipToPx(8.0, dpi));
-            RoundRect(
+            DrawArgbRoundedRectStroke(
                 deviceContext,
                 rect.Left,
                 rect.Top,
                 rect.Right,
                 rect.Bottom,
-                cornerEllipse,
-                cornerEllipse);
+                radius,
+                Math.Max(1, DipToPx(1.0, dpi)),
+                topStrokeArgb,
+                bottomStrokeArgb);
         }
-        finally
-        {
-            SelectObject(deviceContext, oldPen);
-            SelectObject(deviceContext, oldBrush);
-            if (pen != IntPtr.Zero)
-            {
-                DeleteObject(pen);
-            }
-            DeleteObject(brush);
-        }
-
-        return fillColor;
     }
 
     private static uint GetOperatingModeTileArgb(
@@ -623,118 +764,156 @@ internal static class SettingsFlyoutRenderer
                 : OsdTheme.GetFallbackSurfaceArgb();
         }
 
-        if (!isAvailable)
-        {
-            return OsdTheme.IsDarkTheme ? 0xFF333333u : 0xFFF3F3F3u;
-        }
-
         if (selected)
         {
-            // Quick Settings uses a solid system-accent tile for an active action. Keep the same
-            // accent shade that OsdTheme already resolves for the current Windows theme.
             var accent = OsdTheme.GetAccentArgb();
-            if (pressed)
+            if (!isAvailable)
             {
-                return BlendArgb(accent, 0xFF000000u, 0.10);
+                return OsdTheme.IsDarkTheme ? 0x28FFFFFFu : 0x37000000u;
             }
 
-            return hovered ? BlendArgb(accent, 0xFFFFFFFFu, 0.04) : accent;
+            // WinUI AccentButton uses AccentFillColorDefault, then the same accent at 90% for
+            // pointer-over and 80% while pressed.
+            return pressed
+                ? WithAlpha(accent, 0xCC)
+                : hovered
+                    ? WithAlpha(accent, 0xE6)
+                    : accent;
         }
 
-        // Quick Settings tiles are more substantial than a stock 32-DIP command button. Use
-        // solid neutral surfaces so hover/press feedback remains visible over Acrylic in both
-        // themes instead of collapsing toward the fly-out background.
+        // These are the public WinUI ControlFillColor* tokens used by the standard Button style.
+        // Keeping their alpha intact is important: Quick Settings tiles are material overlays, not
+        // opaque gray/white rectangles flattened over Acrylic.
         if (OsdTheme.IsDarkTheme)
         {
-            return pressed ? 0xFF343434u : hovered ? 0xFF424242u : 0xFF3A3A3Au;
+            if (!isAvailable)
+            {
+                return 0x0BFFFFFFu; // ControlFillColorDisabled
+            }
+
+            return pressed
+                ? 0x08FFFFFFu // ControlFillColorTertiary
+                : hovered
+                    ? 0x15FFFFFFu // ControlFillColorSecondary
+                    : 0x0FFFFFFFu; // ControlFillColorDefault
         }
 
-        return pressed ? 0xFFECECECu : hovered ? 0xFFFFFFFFu : 0xFFF9F9F9u;
+        if (!isAvailable)
+        {
+            return 0x4DF9F9F9u; // ControlFillColorDisabled
+        }
+
+        return pressed
+            ? 0x4DF9F9F9u // ControlFillColorTertiary
+            : hovered
+                ? 0x80F9F9F9u // ControlFillColorSecondary
+                : 0xB3FFFFFFu; // ControlFillColorDefault
     }
 
     private static uint GetOperatingModeGlyphColor(
         bool selected,
         bool pressed,
-        bool isAvailable,
-        uint surfaceColor)
+        bool isAvailable)
     {
         if (!isAvailable)
         {
             return OsdTheme.GetSecondaryTextColor();
         }
 
-        if (selected)
+        if (!selected)
         {
-            if (OsdTheme.HighContrast)
-            {
-                return GetSysColor(ColorHighlightText);
-            }
-
-            // Match the WinUI TextOnAccentFillColor tokens used with the system accent palette:
-            // dark theme accents are deliberately light and use dark foreground text; light
-            // theme accents are darker and use white foreground text.
-            var textArgb = OsdTheme.IsDarkTheme
-                ? pressed ? 0xB3000000u : 0xFF000000u
-                : pressed ? 0xB3FFFFFFu : 0xFFFFFFFFu;
-            return CompositeArgbOverColorRef(textArgb, surfaceColor);
+            return pressed ? OsdTheme.GetSecondaryTextColor() : OsdTheme.GetPrimaryTextColor();
         }
 
-        return pressed ? OsdTheme.GetSecondaryTextColor() : OsdTheme.GetPrimaryTextColor();
+        if (OsdTheme.HighContrast)
+        {
+            return GetSysColor(ColorHighlightText);
+        }
+
+        // TextOnAccentFillColorPrimary is black in dark theme and white in light theme. Use the
+        // higher-contrast choice as a safety net for custom/legacy accent palettes whose registry
+        // shade may not satisfy the usual Windows light/dark accent assumptions.
+        var accent = OsdTheme.GetAccentArgb();
+        var blackContrast = GetContrastRatio(accent, 0xFF000000u);
+        var whiteContrast = GetContrastRatio(accent, 0xFFFFFFFFu);
+        return blackContrast >= whiteContrast ? Rgb(0, 0, 0) : Rgb(255, 255, 255);
     }
 
-    private static uint GetOperatingModeStrokeArgb(
-        bool hovered,
+    private static void GetOperatingModeStrokeArgb(
+        bool selected,
         bool pressed,
-        bool isAvailable)
+        bool isAvailable,
+        out uint topArgb,
+        out uint bottomArgb)
     {
-        if (!isAvailable)
+        if (OsdTheme.HighContrast)
         {
-            return OsdTheme.IsDarkTheme ? 0x18FFFFFFu : 0x10000000u;
+            var color = selected ? GetSysColor(ColorHighlightText) : GetSysColor(ColorWindowText);
+            topArgb = bottomArgb = ColorRefToOpaqueArgb(color);
+            return;
+        }
+
+        if (selected)
+        {
+            if (pressed || !isAvailable)
+            {
+                topArgb = bottomArgb = 0;
+                return;
+            }
+
+            // AccentControlElevationBorderBrush: the selected tile keeps the subtle Windows 11
+            // elevation edge instead of the bright flat outline used by the previous revision.
+            topArgb = 0x14FFFFFFu; // ControlStrokeColorOnAccentDefault
+            bottomArgb = OsdTheme.IsDarkTheme ? 0x23000000u : 0x66000000u;
+            return;
+        }
+
+        var defaultStroke = OsdTheme.IsDarkTheme ? 0x12FFFFFFu : 0x0F000000u;
+        if (pressed)
+        {
+            topArgb = bottomArgb = defaultStroke;
+            return;
         }
 
         if (OsdTheme.IsDarkTheme)
         {
-            return pressed ? 0x20FFFFFFu : hovered ? 0x38FFFFFFu : 0x28FFFFFFu;
+            topArgb = 0x18FFFFFFu;
+            bottomArgb = defaultStroke;
+        }
+        else
+        {
+            // WinUI flips ControlElevationBorderBrush in light theme.
+            topArgb = defaultStroke;
+            bottomArgb = 0x29000000u;
+        }
+    }
+
+    private static uint WithAlpha(uint argb, byte alpha) =>
+        ((uint)alpha << 24) | (argb & 0x00FFFFFFu);
+
+    private static double GetContrastRatio(uint firstArgb, uint secondArgb)
+    {
+        static double Linearize(byte component)
+        {
+            var value = component / 255.0;
+            return value <= 0.04045
+                ? value / 12.92
+                : Math.Pow((value + 0.055) / 1.055, 2.4);
         }
 
-        return pressed ? 0x1A000000u : hovered ? 0x24000000u : 0x18000000u;
-    }
+        static double Luminance(uint argb)
+        {
+            var red = Linearize((byte)((argb >> 16) & 0xffu));
+            var green = Linearize((byte)((argb >> 8) & 0xffu));
+            var blue = Linearize((byte)(argb & 0xffu));
+            return (0.2126 * red) + (0.7152 * green) + (0.0722 * blue);
+        }
 
-    private static uint BlendArgb(uint source, uint target, double amount)
-    {
-        amount = Math.Clamp(amount, 0.0, 1.0);
-        static byte BlendComponent(byte sourceComponent, byte targetComponent, double blendAmount) =>
-            (byte)Math.Round(sourceComponent + ((targetComponent - sourceComponent) * blendAmount));
-
-        var red = BlendComponent(
-            (byte)((source >> 16) & 0xffu),
-            (byte)((target >> 16) & 0xffu),
-            amount);
-        var green = BlendComponent(
-            (byte)((source >> 8) & 0xffu),
-            (byte)((target >> 8) & 0xffu),
-            amount);
-        var blue = BlendComponent(
-            (byte)(source & 0xffu),
-            (byte)(target & 0xffu),
-            amount);
-        return 0xFF000000u | ((uint)red << 16) | ((uint)green << 8) | blue;
-    }
-
-    private static uint CompositeArgbOverColorRef(uint argb, uint backgroundColorRef)
-    {
-        var alpha = (argb >> 24) & 0xffu;
-        var inverseAlpha = 255u - alpha;
-        var foregroundRed = (argb >> 16) & 0xffu;
-        var foregroundGreen = (argb >> 8) & 0xffu;
-        var foregroundBlue = argb & 0xffu;
-        var backgroundRed = backgroundColorRef & 0xffu;
-        var backgroundGreen = (backgroundColorRef >> 8) & 0xffu;
-        var backgroundBlue = (backgroundColorRef >> 16) & 0xffu;
-        var red = ((foregroundRed * alpha) + (backgroundRed * inverseAlpha) + 127u) / 255u;
-        var green = ((foregroundGreen * alpha) + (backgroundGreen * inverseAlpha) + 127u) / 255u;
-        var blue = ((foregroundBlue * alpha) + (backgroundBlue * inverseAlpha) + 127u) / 255u;
-        return Rgb((byte)red, (byte)green, (byte)blue);
+        var first = Luminance(firstArgb);
+        var second = Luminance(secondArgb);
+        var lighter = Math.Max(first, second);
+        var darker = Math.Min(first, second);
+        return (lighter + 0.05) / (darker + 0.05);
     }
 
     private static uint ColorRefToOpaqueArgb(uint colorRef)
@@ -745,7 +924,8 @@ internal static class SettingsFlyoutRenderer
         return 0xFF000000u | (red << 16) | (green << 8) | blue;
     }
 
-    private static void DrawOpaqueControlText(
+    private static void DrawControlText(
+        IntPtr window,
         IntPtr deviceContext,
         uint dpi,
         string text,
@@ -759,6 +939,32 @@ internal static class SettingsFlyoutRenderer
         if (string.IsNullOrEmpty(text))
         {
             return;
+        }
+
+        var rect = OsdLayout.ToPixels(dipRect, dpi);
+        if (deviceContext == _backBufferDc && _backBufferSurface is not null &&
+            DrawCompositedControlTextIntoBackBuffer(
+                window,
+                dpi,
+                text,
+                rect,
+                weight,
+                fontSizeDip,
+                alignment,
+                color,
+                fontFamily))
+        {
+            return;
+        }
+
+        // Allocation/theme failure fallback. The normal Acrylic path above is alpha-correct; this
+        // direct GDI branch exists only to keep the control usable if a transient resource fails.
+        var drawingIntoBackBuffer = deviceContext == _backBufferDc && _backBufferSurface is not null;
+        if (drawingIntoBackBuffer)
+        {
+            // The managed pixels are authoritative until CommitBackBufferPixels. Commit first so
+            // fallback GDI text is not immediately overwritten by the final frame copy.
+            CommitBackBufferPixels();
         }
 
         var font = CreateFont(
@@ -781,7 +987,6 @@ internal static class SettingsFlyoutRenderer
             return;
         }
 
-        var rect = OsdLayout.ToPixels(dipRect, dpi);
         var nativeRect = new Rect
         {
             Left = rect.Left,
@@ -790,6 +995,12 @@ internal static class SettingsFlyoutRenderer
             Bottom = rect.Bottom,
         };
         var oldFont = SelectObject(deviceContext, font);
+        if (oldFont == IntPtr.Zero || oldFont == new IntPtr(-1))
+        {
+            DeleteObject(font);
+            return;
+        }
+
         try
         {
             SetTextColor(deviceContext, color);
@@ -804,6 +1015,189 @@ internal static class SettingsFlyoutRenderer
         {
             SelectObject(deviceContext, oldFont);
             DeleteObject(font);
+            if (drawingIntoBackBuffer)
+            {
+                _backBufferSurface?.CopyFrom(_backBufferBits);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Rasterizes control text as premultiplied-alpha glyphs and source-over blends it into the
+    /// persistent Acrylic back buffer without replacing the tile pixels underneath.
+    /// </summary>
+    private static bool DrawCompositedControlTextIntoBackBuffer(
+        IntPtr window,
+        uint dpi,
+        string text,
+        PixelRect targetRect,
+        int weight,
+        double fontSizeDip,
+        uint alignment,
+        uint color,
+        string fontFamily)
+    {
+        var surface = _backBufferSurface;
+        if (surface is null || _backBufferDc == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        var width = targetRect.Right - targetRect.Left;
+        var height = targetRect.Bottom - targetRect.Top;
+        if (width <= 0 || height <= 0)
+        {
+            return false;
+        }
+
+        var memoryDc = CreateCompatibleDC(_backBufferDc);
+        if (memoryDc == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        var bitmapInfo = new BitmapInfo
+        {
+            bmiHeader = new BitmapInfoHeader
+            {
+                biSize = (uint)Marshal.SizeOf<BitmapInfoHeader>(),
+                biWidth = width,
+                biHeight = -height,
+                biPlanes = 1,
+                biBitCount = 32,
+                biCompression = BiRgb,
+            },
+        };
+
+        var bitmap = CreateDIBSection(
+            _backBufferDc,
+            ref bitmapInfo,
+            DibRgbColors,
+            out var bits,
+            IntPtr.Zero,
+            0);
+        if (bitmap == IntPtr.Zero || bits == IntPtr.Zero)
+        {
+            if (bitmap != IntPtr.Zero)
+            {
+                DeleteObject(bitmap);
+            }
+            DeleteDC(memoryDc);
+            return false;
+        }
+
+        var oldBitmap = SelectObject(memoryDc, bitmap);
+        if (oldBitmap == IntPtr.Zero || oldBitmap == new IntPtr(-1))
+        {
+            DeleteObject(bitmap);
+            DeleteDC(memoryDc);
+            return false;
+        }
+
+        var font = CreateFont(
+            -DipToPx(fontSizeDip, dpi),
+            0,
+            0,
+            0,
+            weight,
+            false,
+            false,
+            false,
+            1,
+            0,
+            0,
+            4,
+            0,
+            fontFamily);
+        if (font == IntPtr.Zero)
+        {
+            SelectObject(memoryDc, oldBitmap);
+            DeleteObject(bitmap);
+            DeleteDC(memoryDc);
+            return false;
+        }
+
+        var oldFont = SelectObject(memoryDc, font);
+        if (oldFont == IntPtr.Zero || oldFont == new IntPtr(-1))
+        {
+            DeleteObject(font);
+            SelectObject(memoryDc, oldBitmap);
+            DeleteObject(bitmap);
+            DeleteDC(memoryDc);
+            return false;
+        }
+
+        var theme = OpenThemeData(window, "CompositedWindow::Window");
+
+        try
+        {
+            if (theme == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            var glyphPixels = new int[checked(width * height)];
+            Marshal.Copy(glyphPixels, 0, bits, glyphPixels.Length);
+
+            var localRect = new Rect
+            {
+                Left = 0,
+                Top = 0,
+                Right = width,
+                Bottom = height,
+            };
+            var options = new DttOpts
+            {
+                dwSize = (uint)Marshal.SizeOf<DttOpts>(),
+                dwFlags = DttComposited | DttTextColor,
+                crText = color,
+            };
+
+            if (DrawThemeTextEx(
+                    theme,
+                    memoryDc,
+                    0,
+                    0,
+                    text,
+                    -1,
+                    alignment | DtVCenter | DtSingleLine,
+                    ref localRect,
+                    ref options) < 0)
+            {
+                return false;
+            }
+
+            Marshal.Copy(bits, glyphPixels, 0, glyphPixels.Length);
+            surface.BlendPremultiplied(
+                glyphPixels,
+                width,
+                height,
+                targetRect.Left,
+                targetRect.Top);
+            return true;
+        }
+        finally
+        {
+            if (theme != IntPtr.Zero)
+            {
+                CloseThemeData(theme);
+            }
+
+            if (font != IntPtr.Zero)
+            {
+                if (oldFont != IntPtr.Zero)
+                {
+                    SelectObject(memoryDc, oldFont);
+                }
+                DeleteObject(font);
+            }
+
+            if (oldBitmap != IntPtr.Zero)
+            {
+                SelectObject(memoryDc, oldBitmap);
+            }
+            DeleteObject(bitmap);
+            DeleteDC(memoryDc);
         }
     }
 
