@@ -73,6 +73,21 @@ internal sealed class MutableHardwareSettingsStore
             hardware["MiniLedMode"] = miniLedMode.ToString();
         }
 
+        if (patch.SplendidVisualMode is { } splendidVisualMode)
+        {
+            hardware["VisualMode"] = splendidVisualMode.ToString();
+        }
+
+        if (patch.SplendidGamutMode is { } splendidGamutMode)
+        {
+            hardware["GamutMode"] = splendidGamutMode.ToString();
+        }
+
+        if (patch.SplendidColorTemperature is { } splendidColorTemperature)
+        {
+            hardware["ColorTemperature"] = (int)splendidColorTemperature;
+        }
+
         var json = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine;
         var temporaryPath = _settingsPath + ".tmp";
         try

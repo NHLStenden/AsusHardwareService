@@ -31,8 +31,28 @@ internal sealed class SplendidProfileApplier
     }
 
     /// <summary>Runs the configured ASUS Splendid command sequence in the specified user session.</summary>
-    public async Task<bool> ApplyConfiguredProfileAsync(
+    public Task<bool> ApplyConfiguredProfileAsync(
         int sessionId,
+        CancellationToken cancellationToken = default) =>
+        ApplyProfileAsync(
+            sessionId,
+            _options.CurrentValue.SplendidVisualMode,
+            _options.CurrentValue.SplendidGamutMode,
+            (SplendidColorTemperature)_options.CurrentValue.ColorTemperature,
+            cancellationToken);
+
+    /// <summary>Applies one complete ASUS Splendid display-color profile.</summary>
+    /// <param name="sessionId">The interactive Windows session that owns the display profile.</param>
+    /// <param name="visualMode">The visual preset to apply.</param>
+    /// <param name="gamutMode">The color gamut to apply.</param>
+    /// <param name="colorTemperature">The color-temperature preset to apply.</param>
+    /// <param name="cancellationToken">Cancels the command sequence.</param>
+    /// <returns><see langword="true"/> when every ASUS Splendid command was launched.</returns>
+    public async Task<bool> ApplyProfileAsync(
+        int sessionId,
+        SplendidVisualMode visualMode,
+        SplendidGamutMode gamutMode,
+        SplendidColorTemperature colorTemperature,
         CancellationToken cancellationToken = default)
     {
         var executablePath = AsusDriverLocator.TryResolveCompanionFile(SplendidExecutableName, _logger);
@@ -41,7 +61,8 @@ internal sealed class SplendidProfileApplier
             return false;
         }
 
-        foreach (var command in BuildCommandSequence(_options.CurrentValue))
+        var options = _options.CurrentValue;
+        foreach (var command in BuildCommandSequence(options, visualMode, gamutMode, colorTemperature))
         {
             var arguments = BuildArguments(command);
             _logger.LogInformation(
@@ -66,7 +87,11 @@ internal sealed class SplendidProfileApplier
         return true;
     }
 
-    private static IReadOnlyList<SplendidCommand> BuildCommandSequence(HardwareOptions options)
+    private static IReadOnlyList<SplendidCommand> BuildCommandSequence(
+        HardwareOptions options,
+        SplendidVisualMode visualMode,
+        SplendidGamutMode gamutMode,
+        SplendidColorTemperature colorTemperature)
     {
         List<SplendidCommand> commands = [new(InitializeCommand)];
         if (options.ResetColorProfileBeforeApply)
@@ -75,8 +100,8 @@ internal sealed class SplendidProfileApplier
             commands.Add(new(DefaultVisualCommand, 0, DefaultIntensity));
         }
 
-        commands.Add(new(GamutModeCommand, 0, (int)options.SplendidGamutMode));
-        commands.Add(new((int)options.SplendidVisualMode, 0, options.ColorTemperature));
+        commands.Add(new(GamutModeCommand, 0, (int)gamutMode));
+        commands.Add(new((int)visualMode, 0, (int)colorTemperature));
         return commands;
     }
 

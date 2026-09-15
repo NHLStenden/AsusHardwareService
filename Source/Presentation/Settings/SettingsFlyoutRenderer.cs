@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using AsusHardwareService.Asus.Display;
 using AsusHardwareService.Asus.Performance;
+using AsusHardwareService.Asus.Splendid;
 using AsusHardwareService.Presentation.Osd;
 using static AsusHardwareService.Presentation.Osd.OsdNativeMethods;
 
@@ -19,6 +20,9 @@ internal static class SettingsFlyoutRenderer
     private const string OneZoneGlyph = "\uE706"; // Brightness
     private const string MultiZoneGlyph = "\uECA5"; // Tiles
     private const string StrongMiniLedGlyph = "\uE7E6"; // Highlight
+    private const string ChevronDownGlyph = "\uE70D"; // ChevronDown
+    private const string ChevronUpGlyph = "\uE70E"; // ChevronUp
+    private const string CheckMarkGlyph = "\uE73E"; // CheckMark
     private const int ColorHighlightText = 14;
     // Segoe Fluent Icons is optically hinted at 20 DIP; avoid fractional/non-standard glyph sizes.
     private const double FluentIconFontSizeDip = 20.0;
@@ -72,7 +76,10 @@ internal static class SettingsFlyoutRenderer
 
             DrawSurface(window, _backBufferDc, dpi, ref clientRect, model);
             CommitBackBufferPixels();
-            var paintForeground = IntersectsForeground(paintDc, dpi);
+            // While an in-window Splendid drop-down is open, its buffered layer is authoritative
+            // for the covered region. Repainting Acrylic foreground text directly afterward would
+            // punch dark text DIBs through the popup and expose partial frames while hovering.
+            var paintForeground = model.OpenSplendidPopup is null && IntersectsForeground(paintDc, dpi);
             if (OsdTheme.HighContrast && paintForeground)
             {
                 // High contrast text is ordinary GDI output and can be committed atomically too.
@@ -194,6 +201,33 @@ internal static class SettingsFlyoutRenderer
         {
             DrawMiniLedModeFocus(deviceContext, dpi, model.MiniLedMode);
         }
+
+        foreach (var selector in Enum.GetValues<SplendidProfileSelector>())
+        {
+            DrawSplendidProfileSelector(deviceContext, dpi, model, selector);
+            DrawSplendidProfileRowText(window, deviceContext, dpi, model, selector, selector switch
+            {
+                SplendidProfileSelector.VisualMode => "Visual mode",
+                SplendidProfileSelector.GamutMode => "Color gamut",
+                SplendidProfileSelector.ColorTemperature => "Color temperature",
+                _ => throw new ArgumentOutOfRangeException(nameof(selector), selector, "Unsupported Splendid selector."),
+            });
+
+            if (model.ShowFocusVisual &&
+                IsSplendidSelectorEnabled(model, selector) &&
+                model.FocusedControl == GetFocusedControl(selector))
+            {
+                DrawSplendidProfileFocus(deviceContext, dpi, selector);
+            }
+        }
+
+        if (model.OpenSplendidPopup is { })
+        {
+            // The drop-down is an in-window top layer. Render both its surface and content into
+            // the same persistent DIB so hover/selection changes are presented as one frame.
+            DrawSplendidPopupSurface(deviceContext, dpi, model);
+            DrawSplendidPopupForeground(window, deviceContext, dpi, model);
+        }
     }
 
     private static void DrawForeground(
@@ -292,6 +326,17 @@ internal static class SettingsFlyoutRenderer
         DrawMiniLedModeLabel(window, deviceContext, dpi, model, MiniLedMode.MultiZone, "Multi Zone");
         DrawMiniLedModeLabel(window, deviceContext, dpi, model, MiniLedMode.MultiZoneStrong, "Strong");
 
+        DrawTextOnSurface(
+            window,
+            deviceContext,
+            dpi,
+            "Visual",
+            SettingsFlyoutLayout.SplendidTitleRect,
+            400,
+            14,
+            DtLeft,
+            primary);
+
         // Normal operation is intentionally silent, like Quick Settings. Only exceptional
         // states use the small secondary line; there is no instructional or success copy.
         if (!string.IsNullOrWhiteSpace(model.StatusText))
@@ -327,6 +372,7 @@ internal static class SettingsFlyoutRenderer
             IsVisible(paintDc, OsdLayout.ToPixels(SettingsFlyoutLayout.MiniLedOneZoneLabelRect, dpi)) ||
             IsVisible(paintDc, OsdLayout.ToPixels(SettingsFlyoutLayout.MiniLedMultiZoneLabelRect, dpi)) ||
             IsVisible(paintDc, OsdLayout.ToPixels(SettingsFlyoutLayout.MiniLedStrongLabelRect, dpi)) ||
+            IsVisible(paintDc, OsdLayout.ToPixels(SettingsFlyoutLayout.SplendidTitleRect, dpi)) ||
             IsVisible(paintDc, OsdLayout.ToPixels(SettingsFlyoutLayout.StatusRect, dpi));
     }
 
@@ -667,6 +713,293 @@ internal static class SettingsFlyoutRenderer
             Math.Max(1, DipToPx(8.0, dpi)),
             dpi);
     }
+
+    private static void DrawSplendidProfileSelector(
+        IntPtr deviceContext,
+        uint dpi,
+        SettingsFlyoutViewModel model,
+        SplendidProfileSelector selector)
+    {
+        var rect = OsdLayout.ToPixels(SettingsFlyoutLayout.GetSplendidSelectorRect(selector), dpi);
+        var hovered = model.HoveredSplendidSelector == selector;
+        var pressed = model.PressedSplendidSelector == selector && hovered;
+        DrawOperatingModeSurface(
+            deviceContext,
+            dpi,
+            rect,
+            selected: false,
+            hovered,
+            pressed,
+            IsSplendidSelectorEnabled(model, selector));
+    }
+
+    private static void DrawSplendidProfileRowText(
+        IntPtr window,
+        IntPtr deviceContext,
+        uint dpi,
+        SettingsFlyoutViewModel model,
+        SplendidProfileSelector selector,
+        string label)
+    {
+        var enabled = IsSplendidSelectorEnabled(model, selector);
+        var primary = OsdTheme.GetPrimaryTextColor();
+        var secondary = OsdTheme.GetSecondaryTextColor();
+        var labelRect = selector switch
+        {
+            SplendidProfileSelector.VisualMode => SettingsFlyoutLayout.SplendidVisualLabelRect,
+            SplendidProfileSelector.GamutMode => SettingsFlyoutLayout.SplendidGamutLabelRect,
+            SplendidProfileSelector.ColorTemperature => SettingsFlyoutLayout.SplendidTemperatureLabelRect,
+            _ => throw new ArgumentOutOfRangeException(nameof(selector), selector, "Unsupported Splendid selector."),
+        };
+
+        DrawControlText(
+            window, deviceContext, dpi, label, labelRect, 400, 13, DtLeft, enabled ? primary : secondary);
+        DrawControlText(
+            window,
+            deviceContext,
+            dpi,
+            GetSplendidValueLabel(model, selector),
+            SettingsFlyoutLayout.GetSplendidValueRect(selector),
+            400,
+            13,
+            DtRight,
+            enabled ? primary : secondary);
+        DrawControlText(
+            window,
+            deviceContext,
+            dpi,
+            model.OpenSplendidPopup == selector ? ChevronUpGlyph : ChevronDownGlyph,
+            SettingsFlyoutLayout.GetSplendidChevronRect(selector),
+            400,
+            12,
+            DtCenter,
+            secondary,
+            IconFontFamily);
+    }
+
+    private static void DrawSplendidPopupSurface(
+        IntPtr deviceContext,
+        uint dpi,
+        SettingsFlyoutViewModel model)
+    {
+        if (model.OpenSplendidPopup is not { } selector)
+        {
+            return;
+        }
+
+        var popup = OsdLayout.ToPixels(SettingsFlyoutLayout.GetSplendidPopupRect(selector), dpi);
+        var radius = Math.Max(1, DipToPx(8.0, dpi));
+        DrawArgbRoundedRect(
+            deviceContext,
+            popup.Left,
+            popup.Top,
+            popup.Right,
+            popup.Bottom,
+            radius,
+            OsdTheme.GetFallbackSurfaceArgb());
+
+        for (var index = 0; index < SettingsFlyoutLayout.GetSplendidPopupItemCount(selector); index++)
+        {
+            var selected = IsSplendidPopupItemSelected(model, selector, index);
+            var hovered = model.HoveredSplendidPopupIndex == index;
+            var pressed = model.PressedSplendidPopupIndex == index && hovered;
+            if (!selected && !hovered && !pressed)
+            {
+                continue;
+            }
+
+            var item = OsdLayout.ToPixels(SettingsFlyoutLayout.GetSplendidPopupItemRect(selector, index), dpi);
+            DrawOperatingModeSurface(
+                deviceContext,
+                dpi,
+                item,
+                selected,
+                hovered,
+                pressed,
+                IsSplendidSelectorEnabled(model, selector));
+        }
+    }
+
+    private static void DrawSplendidPopupForeground(
+        IntPtr window,
+        IntPtr deviceContext,
+        uint dpi,
+        SettingsFlyoutViewModel model)
+    {
+        if (model.OpenSplendidPopup is not { } selector)
+        {
+            return;
+        }
+
+        for (var index = 0; index < SettingsFlyoutLayout.GetSplendidPopupItemCount(selector); index++)
+        {
+            var selected = IsSplendidPopupItemSelected(model, selector, index);
+            var textColor = selected
+                ? GetOperatingModeGlyphColor(selected: true, pressed: false, isAvailable: true)
+                : OsdTheme.GetPrimaryTextColor();
+            var item = SettingsFlyoutLayout.GetSplendidPopupItemRect(selector, index);
+            var textRect = new DipRect(item.Left + 12.0, item.Top, item.Right - 36.0, item.Bottom);
+            DrawControlText(
+                window,
+                deviceContext,
+                dpi,
+                GetSplendidPopupItemLabel(selector, index),
+                textRect,
+                400,
+                13,
+                DtLeft,
+                textColor);
+
+            if (selected)
+            {
+                var checkRect = new DipRect(item.Right - 32.0, item.Top, item.Right - 8.0, item.Bottom);
+                DrawControlText(
+                    window,
+                    deviceContext,
+                    dpi,
+                    CheckMarkGlyph,
+                    checkRect,
+                    400,
+                    12,
+                    DtCenter,
+                    textColor,
+                    IconFontFamily);
+            }
+        }
+    }
+
+    private static void DrawSplendidProfileFocus(
+        IntPtr deviceContext,
+        uint dpi,
+        SplendidProfileSelector selector)
+    {
+        var rect = OsdLayout.ToPixels(SettingsFlyoutLayout.GetSplendidSelectorRect(selector), dpi);
+        var inset = DipToPx(2.0, dpi);
+        DrawFocusOutline(
+            deviceContext,
+            rect.Left + inset,
+            rect.Top + inset,
+            rect.Right - inset,
+            rect.Bottom - inset,
+            Math.Max(1, DipToPx(8.0, dpi)),
+            dpi);
+    }
+
+    private static bool IsSplendidSelectorEnabled(
+        SettingsFlyoutViewModel model,
+        SplendidProfileSelector selector) =>
+        model.IsAvailable &&
+        (selector == SplendidProfileSelector.VisualMode || model.SplendidVisualMode != SplendidVisualMode.Disabled);
+
+    private static SettingsFlyoutFocusedControl GetFocusedControl(SplendidProfileSelector selector) => selector switch
+    {
+        SplendidProfileSelector.VisualMode => SettingsFlyoutFocusedControl.SplendidVisualMode,
+        SplendidProfileSelector.GamutMode => SettingsFlyoutFocusedControl.SplendidGamutMode,
+        SplendidProfileSelector.ColorTemperature => SettingsFlyoutFocusedControl.SplendidColorTemperature,
+        _ => throw new ArgumentOutOfRangeException(nameof(selector), selector, "Unsupported Splendid selector."),
+    };
+
+    private static bool IsSplendidPopupItemSelected(
+        SettingsFlyoutViewModel model,
+        SplendidProfileSelector selector,
+        int index) => selector switch
+    {
+        SplendidProfileSelector.VisualMode => model.SplendidVisualMode == GetSplendidVisualModeAtIndex(index),
+        SplendidProfileSelector.GamutMode => model.SplendidGamutMode == GetSplendidGamutModeAtIndex(index),
+        SplendidProfileSelector.ColorTemperature =>
+            model.SplendidColorTemperature == GetSplendidColorTemperatureAtIndex(index),
+        _ => false,
+    };
+
+    private static string GetSplendidValueLabel(
+        SettingsFlyoutViewModel model,
+        SplendidProfileSelector selector) => selector switch
+    {
+        SplendidProfileSelector.VisualMode => GetSplendidVisualModeLabel(model.SplendidVisualMode),
+        SplendidProfileSelector.GamutMode => GetSplendidGamutModeLabel(model.SplendidGamutMode),
+        SplendidProfileSelector.ColorTemperature =>
+            GetSplendidColorTemperatureLabel(model.SplendidColorTemperature),
+        _ => string.Empty,
+    };
+
+    private static string GetSplendidPopupItemLabel(SplendidProfileSelector selector, int index) => selector switch
+    {
+        SplendidProfileSelector.VisualMode => GetSplendidVisualModeLabel(GetSplendidVisualModeAtIndex(index)),
+        SplendidProfileSelector.GamutMode => GetSplendidGamutModeLabel(GetSplendidGamutModeAtIndex(index)),
+        SplendidProfileSelector.ColorTemperature =>
+            GetSplendidColorTemperatureLabel(GetSplendidColorTemperatureAtIndex(index)),
+        _ => string.Empty,
+    };
+
+    private static SplendidVisualMode GetSplendidVisualModeAtIndex(int index) => index switch
+    {
+        0 => SplendidVisualMode.Default,
+        1 => SplendidVisualMode.Vivid,
+        2 => SplendidVisualMode.Racing,
+        3 => SplendidVisualMode.Scenery,
+        4 => SplendidVisualMode.Rts,
+        5 => SplendidVisualMode.Fps,
+        6 => SplendidVisualMode.Cinema,
+        7 => SplendidVisualMode.EyeCare,
+        8 => SplendidVisualMode.EReading,
+        _ => SplendidVisualMode.Disabled,
+    };
+
+    private static SplendidGamutMode GetSplendidGamutModeAtIndex(int index) => index switch
+    {
+        0 => SplendidGamutMode.Native,
+        1 => SplendidGamutMode.SRgb,
+        2 => SplendidGamutMode.DciP3,
+        _ => SplendidGamutMode.DisplayP3,
+    };
+
+    private static SplendidColorTemperature GetSplendidColorTemperatureAtIndex(int index) => index switch
+    {
+        0 => SplendidColorTemperature.Warmest,
+        1 => SplendidColorTemperature.Warmer,
+        2 => SplendidColorTemperature.Warm,
+        3 => SplendidColorTemperature.Neutral,
+        4 => SplendidColorTemperature.Cold,
+        5 => SplendidColorTemperature.Colder,
+        _ => SplendidColorTemperature.Coldest,
+    };
+
+    private static string GetSplendidVisualModeLabel(SplendidVisualMode visualMode) => visualMode switch
+    {
+        SplendidVisualMode.Default => "Default",
+        SplendidVisualMode.Vivid => "Vivid",
+        SplendidVisualMode.Racing => "Racing",
+        SplendidVisualMode.Scenery => "Scenery",
+        SplendidVisualMode.Rts => "RTS / RPG",
+        SplendidVisualMode.Fps => "FPS",
+        SplendidVisualMode.Cinema => "Cinema",
+        SplendidVisualMode.EyeCare => "Eye Care",
+        SplendidVisualMode.EReading => "E-reading",
+        SplendidVisualMode.Disabled => "Disabled",
+        _ => "Default",
+    };
+
+    private static string GetSplendidGamutModeLabel(SplendidGamutMode gamutMode) => gamutMode switch
+    {
+        SplendidGamutMode.Native => "Native",
+        SplendidGamutMode.SRgb => "sRGB",
+        SplendidGamutMode.DciP3 => "DCI-P3",
+        SplendidGamutMode.DisplayP3 => "Display P3",
+        _ => "Native",
+    };
+
+    private static string GetSplendidColorTemperatureLabel(SplendidColorTemperature colorTemperature) =>
+        colorTemperature switch
+        {
+            SplendidColorTemperature.Warmest => "Warmest",
+            SplendidColorTemperature.Warmer => "Warmer",
+            SplendidColorTemperature.Warm => "Warm",
+            SplendidColorTemperature.Neutral => "Neutral",
+            SplendidColorTemperature.Cold => "Cold",
+            SplendidColorTemperature.Colder => "Colder",
+            SplendidColorTemperature.Coldest => "Coldest",
+            _ => "Neutral",
+        };
 
     private static void DrawSliderFocus(
         IntPtr deviceContext,

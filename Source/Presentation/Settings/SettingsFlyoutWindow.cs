@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using AsusHardwareService.Asus.Display;
 using AsusHardwareService.Asus.Performance;
+using AsusHardwareService.Asus.Splendid;
 using AsusHardwareService.Presentation.Osd;
 using AsusHardwareService.Settings;
 using static AsusHardwareService.Presentation.Osd.OsdNativeMethods;
@@ -46,6 +47,17 @@ internal static class SettingsFlyoutWindow
     private static MiniLedMode _committedMiniLedMode = MiniLedMode.MultiZone;
     private static MiniLedMode? _hoveredMiniLedMode;
     private static MiniLedMode? _pressedMiniLedMode;
+    private static SplendidVisualMode _splendidVisualMode = SplendidVisualMode.Default;
+    private static SplendidVisualMode _committedSplendidVisualMode = SplendidVisualMode.Default;
+    private static SplendidGamutMode _splendidGamutMode = SplendidGamutMode.Native;
+    private static SplendidGamutMode _committedSplendidGamutMode = SplendidGamutMode.Native;
+    private static SplendidColorTemperature _splendidColorTemperature = SplendidColorTemperature.Neutral;
+    private static SplendidColorTemperature _committedSplendidColorTemperature = SplendidColorTemperature.Neutral;
+    private static SplendidProfileSelector? _hoveredSplendidSelector;
+    private static SplendidProfileSelector? _pressedSplendidSelector;
+    private static SplendidProfileSelector? _openSplendidPopup;
+    private static int? _hoveredSplendidPopupIndex;
+    private static int? _pressedSplendidPopupIndex;
     private static SettingsFlyoutFocusedControl _focusedControl = SettingsFlyoutFocusedControl.BatteryChargeLimit;
     private static bool _isAvailable;
     private static bool _isLoading;
@@ -174,6 +186,37 @@ internal static class SettingsFlyoutWindow
                     InvalidateFocusVisual(window, previouslyFocusedControl);
                 }
 
+                // The open ComboBox-style popup is the top-most interaction layer. Do not let
+                // pointer input fall through to the hardware controls it visually covers.
+                if (_openSplendidPopup is { } openSplendidSelector)
+                {
+                    if (CanEditSplendidSelector(openSplendidSelector) && TryGetSplendidPopupIndexAtPoint(
+                        window,
+                        openSplendidSelector,
+                        GetMouseX(lParam),
+                        GetMouseY(lParam),
+                        out var popupIndex))
+                    {
+                        KillTimer(window, ApplyDebounceTimerId);
+                        _focusedControl = GetFocusedControl(openSplendidSelector);
+                        _hoveredSplendidPopupIndex = popupIndex;
+                        _pressedSplendidPopupIndex = popupIndex;
+                        EnsureMouseLeaveTracking(window);
+                        SetCapture(window);
+                        InvalidateDipRect(
+                            window,
+                            SettingsFlyoutLayout.GetSplendidPopupItemRect(openSplendidSelector, popupIndex));
+                        return IntPtr.Zero;
+                    }
+
+                    if (!IsSplendidSelectorAtPoint(
+                        window, openSplendidSelector, GetMouseX(lParam), GetMouseY(lParam)))
+                    {
+                        CloseSplendidPopup(window);
+                        return IntPtr.Zero;
+                    }
+                }
+
                 if (CanEdit() && IsPointInSlider(window, GetMouseX(lParam), GetMouseY(lParam)))
                 {
                     KillTimer(window, ApplyDebounceTimerId);
@@ -240,6 +283,21 @@ internal static class SettingsFlyoutWindow
                     InvalidateMiniLedModeTile(window, miniLedMode);
                     return IntPtr.Zero;
                 }
+
+                if (TryGetSplendidSelectorAtPoint(
+                    window, GetMouseX(lParam), GetMouseY(lParam), out var splendidSelector) &&
+                    CanEditSplendidSelector(splendidSelector))
+                {
+                    KillTimer(window, ApplyDebounceTimerId);
+                    _focusedControl = GetFocusedControl(splendidSelector);
+                    _hoveredSplendidSelector = splendidSelector;
+                    _pressedSplendidSelector = splendidSelector;
+                    EnsureMouseLeaveTracking(window);
+                    SetCapture(window);
+                    InvalidateDipRect(window, SettingsFlyoutLayout.GetSplendidSelectorRect(splendidSelector));
+                    return IntPtr.Zero;
+                }
+
                 return IntPtr.Zero;
 
             case WmMouseMove:
@@ -269,6 +327,19 @@ internal static class SettingsFlyoutWindow
                 {
                     _hoveredMiniLedMode = null;
                     InvalidateMiniLedModeTile(window, previouslyHoveredMiniLedMode);
+                }
+                if (_hoveredSplendidSelector is { } hoveredSplendidSelector)
+                {
+                    _hoveredSplendidSelector = null;
+                    InvalidateDipRect(window, SettingsFlyoutLayout.GetSplendidSelectorRect(hoveredSplendidSelector));
+                }
+                if (_hoveredSplendidPopupIndex is { } hoveredSplendidIndex &&
+                    _openSplendidPopup is { } hoveredPopupSelector)
+                {
+                    _hoveredSplendidPopupIndex = null;
+                    InvalidateDipRect(
+                        window,
+                        SettingsFlyoutLayout.GetSplendidPopupItemRect(hoveredPopupSelector, hoveredSplendidIndex));
                 }
                 return IntPtr.Zero;
 
@@ -345,22 +416,75 @@ internal static class SettingsFlyoutWindow
                         BeginApply(window);
                     }
                 }
+
+                if (_pressedSplendidPopupIndex is { } pressedSplendidIndex &&
+                    _openSplendidPopup is { } pressedPopupSelector)
+                {
+                    var shouldCommit = CanEditSplendidSelector(pressedPopupSelector) &&
+                        TryGetSplendidPopupIndexAtPoint(
+                            window,
+                            pressedPopupSelector,
+                            GetMouseX(lParam),
+                            GetMouseY(lParam),
+                            out var releasedSplendidIndex) &&
+                        releasedSplendidIndex == pressedSplendidIndex;
+                    _pressedSplendidPopupIndex = null;
+                    ReleaseCapture();
+                    if (shouldCommit)
+                    {
+                        ApplySplendidPopupSelection(window, pressedPopupSelector, pressedSplendidIndex);
+                        CloseSplendidPopup(window);
+                        BeginApply(window);
+                    }
+                    else
+                    {
+                        UpdateTileHover(window, GetMouseX(lParam), GetMouseY(lParam));
+                        InvalidateDipRect(
+                            window,
+                            SettingsFlyoutLayout.GetSplendidPopupItemRect(
+                                pressedPopupSelector, pressedSplendidIndex));
+                    }
+                }
+
+                if (_pressedSplendidSelector is { } pressedSplendidSelector)
+                {
+                    var shouldToggle = CanEditSplendidSelector(pressedSplendidSelector) &&
+                        IsSplendidSelectorAtPoint(
+                            window, pressedSplendidSelector, GetMouseX(lParam), GetMouseY(lParam));
+                    _pressedSplendidSelector = null;
+                    ReleaseCapture();
+                    UpdateTileHover(window, GetMouseX(lParam), GetMouseY(lParam));
+                    InvalidateDipRect(window, SettingsFlyoutLayout.GetSplendidSelectorRect(pressedSplendidSelector));
+                    if (shouldToggle)
+                    {
+                        SetSplendidPopupOpen(
+                            window,
+                            _openSplendidPopup == pressedSplendidSelector ? null : pressedSplendidSelector);
+                    }
+                }
                 return IntPtr.Zero;
 
             case WmCaptureChanged:
                 if (_isDragging ||
                     _pressedOperatingMode is not null ||
                     _pressedLaptopDisplayMode is not null ||
-                    _pressedMiniLedMode is not null)
+                    _pressedMiniLedMode is not null ||
+                    _pressedSplendidSelector is not null ||
+                    _pressedSplendidPopupIndex is not null)
                 {
                     var wasDragging = _isDragging;
                     var previouslyPressedMode = _pressedOperatingMode;
                     var previouslyPressedDisplayMode = _pressedLaptopDisplayMode;
                     var previouslyPressedMiniLedMode = _pressedMiniLedMode;
+                    var previouslyPressedSplendidSelector = _pressedSplendidSelector;
+                    var capturedSplendidPopupIndex = _pressedSplendidPopupIndex;
+                    var capturedPopupSelector = _openSplendidPopup;
                     _isDragging = false;
                     _pressedOperatingMode = null;
                     _pressedLaptopDisplayMode = null;
                     _pressedMiniLedMode = null;
+                    _pressedSplendidSelector = null;
+                    _pressedSplendidPopupIndex = null;
                     if (wasDragging)
                     {
                         InvalidateDipRect(window, SettingsFlyoutLayout.SliderVisualRect);
@@ -368,6 +492,16 @@ internal static class SettingsFlyoutWindow
                     InvalidateOperatingModeTile(window, previouslyPressedMode);
                     InvalidateLaptopDisplayModeTile(window, previouslyPressedDisplayMode);
                     InvalidateMiniLedModeTile(window, previouslyPressedMiniLedMode);
+                    if (previouslyPressedSplendidSelector is { } capturedSplendidSelector)
+                    {
+                        InvalidateDipRect(window, SettingsFlyoutLayout.GetSplendidSelectorRect(capturedSplendidSelector));
+                    }
+                    if (capturedSplendidPopupIndex is { } splendidIndex && capturedPopupSelector is { } popupSelector)
+                    {
+                        InvalidateDipRect(
+                            window,
+                            SettingsFlyoutLayout.GetSplendidPopupItemRect(popupSelector, splendidIndex));
+                    }
                 }
                 return IntPtr.Zero;
 
@@ -375,21 +509,27 @@ internal static class SettingsFlyoutWindow
                 var key = (int)wParam.ToUInt64();
                 if (key == VkEscape)
                 {
-                    RequestClose(window, commitPendingChange: false);
+                    if (_openSplendidPopup is not null)
+                    {
+                        CloseSplendidPopup(window);
+                    }
+                    else
+                    {
+                        RequestClose(window, commitPendingChange: false);
+                    }
                     return IntPtr.Zero;
                 }
 
                 if (key == VkTab)
                 {
+                    if (_openSplendidPopup is not null)
+                    {
+                        CloseSplendidPopup(window);
+                    }
+
                     var previouslyFocusedControl = _focusedControl;
                     var focusWasVisible = _showFocusVisual;
-                    _focusedControl = _focusedControl switch
-                    {
-                        SettingsFlyoutFocusedControl.BatteryChargeLimit => SettingsFlyoutFocusedControl.OperatingMode,
-                        SettingsFlyoutFocusedControl.OperatingMode => SettingsFlyoutFocusedControl.LaptopDisplayMode,
-                        SettingsFlyoutFocusedControl.LaptopDisplayMode => SettingsFlyoutFocusedControl.MiniLedMode,
-                        _ => SettingsFlyoutFocusedControl.BatteryChargeLimit,
-                    };
+                    _focusedControl = GetNextFocusedControl(_focusedControl);
                     _showFocusVisual = true;
                     if (focusWasVisible)
                     {
@@ -407,6 +547,12 @@ internal static class SettingsFlyoutWindow
                         SettingsFlyoutFocusedControl.OperatingMode => HandleOperatingModeKeyAdjustment(window, key),
                         SettingsFlyoutFocusedControl.LaptopDisplayMode => HandleLaptopDisplayModeKeyAdjustment(window, key),
                         SettingsFlyoutFocusedControl.MiniLedMode => HandleMiniLedModeKeyAdjustment(window, key),
+                        SettingsFlyoutFocusedControl.SplendidVisualMode =>
+                            HandleSplendidSelectorKeyAdjustment(window, SplendidProfileSelector.VisualMode, key),
+                        SettingsFlyoutFocusedControl.SplendidGamutMode =>
+                            HandleSplendidSelectorKeyAdjustment(window, SplendidProfileSelector.GamutMode, key),
+                        SettingsFlyoutFocusedControl.SplendidColorTemperature =>
+                            HandleSplendidSelectorKeyAdjustment(window, SplendidProfileSelector.ColorTemperature, key),
                         _ => false,
                     };
                     if (handled)
@@ -542,7 +688,23 @@ internal static class SettingsFlyoutWindow
         var miniLedMode = _miniLedMode != _committedMiniLedMode
             ? _miniLedMode
             : (MiniLedMode?)null;
-        var patch = new HardwareSettingsPatch(chargeLimit, operatingMode, laptopDisplayMode, miniLedMode);
+        var splendidVisualMode = _splendidVisualMode != _committedSplendidVisualMode
+            ? _splendidVisualMode
+            : (SplendidVisualMode?)null;
+        var splendidGamutMode = _splendidGamutMode != _committedSplendidGamutMode
+            ? _splendidGamutMode
+            : (SplendidGamutMode?)null;
+        var splendidColorTemperature = _splendidColorTemperature != _committedSplendidColorTemperature
+            ? _splendidColorTemperature
+            : (SplendidColorTemperature?)null;
+        var patch = new HardwareSettingsPatch(
+            chargeLimit,
+            operatingMode,
+            laptopDisplayMode,
+            miniLedMode,
+            splendidVisualMode,
+            splendidGamutMode,
+            splendidColorTemperature);
         if (patch.IsEmpty)
         {
             return;
@@ -593,6 +755,9 @@ internal static class SettingsFlyoutWindow
             _value = _committedValue;
             _laptopDisplayMode = _committedLaptopDisplayMode;
             _miniLedMode = _committedMiniLedMode;
+            _splendidVisualMode = _committedSplendidVisualMode;
+            _splendidGamutMode = _committedSplendidGamutMode;
+            _splendidColorTemperature = _committedSplendidColorTemperature;
             _isAvailable = false;
             _statusText = "Service unavailable.";
         }
@@ -636,6 +801,12 @@ internal static class SettingsFlyoutWindow
         _laptopDisplayMode = _committedLaptopDisplayMode;
         _committedMiniLedMode = snapshot.MiniLedMode;
         _miniLedMode = _committedMiniLedMode;
+        _committedSplendidVisualMode = snapshot.SplendidVisualMode;
+        _splendidVisualMode = _committedSplendidVisualMode;
+        _committedSplendidGamutMode = snapshot.SplendidGamutMode;
+        _splendidGamutMode = _committedSplendidGamutMode;
+        _committedSplendidColorTemperature = snapshot.SplendidColorTemperature;
+        _splendidColorTemperature = _committedSplendidColorTemperature;
     }
 
     private static bool HandleBatteryKeyAdjustment(IntPtr window, int key)
@@ -785,6 +956,162 @@ internal static class SettingsFlyoutWindow
         return true;
     }
 
+    private static bool HandleSplendidSelectorKeyAdjustment(
+        IntPtr window,
+        SplendidProfileSelector selector,
+        int key)
+    {
+        if (!CanEditSplendidSelector(selector))
+        {
+            return false;
+        }
+
+        if (_openSplendidPopup != selector)
+        {
+            if (key is VkUp or VkDown or 0x0D or 0x20) // Up, Down, Enter, Space
+            {
+                SetSplendidPopupOpen(window, selector);
+                return true;
+            }
+
+            return false;
+        }
+
+        var currentIndex = _hoveredSplendidPopupIndex ?? GetSplendidSelectionIndex(selector);
+        var lastIndex = SettingsFlyoutLayout.GetSplendidPopupItemCount(selector) - 1;
+        switch (key)
+        {
+            case VkUp:
+                currentIndex = Math.Max(0, currentIndex - 1);
+                break;
+            case VkDown:
+                currentIndex = Math.Min(lastIndex, currentIndex + 1);
+                break;
+            case VkHome:
+                currentIndex = 0;
+                break;
+            case VkEnd:
+                currentIndex = lastIndex;
+                break;
+            case 0x0D: // VK_RETURN
+            case 0x20: // VK_SPACE
+                ApplySplendidPopupSelection(window, selector, currentIndex);
+                CloseSplendidPopup(window);
+                BeginApply(window);
+                return true;
+            default:
+                return false;
+        }
+
+        var previousIndex = _hoveredSplendidPopupIndex;
+        _hoveredSplendidPopupIndex = currentIndex;
+        if (previousIndex is { } previous)
+        {
+            InvalidateDipRect(window, SettingsFlyoutLayout.GetSplendidPopupItemRect(selector, previous));
+        }
+
+        InvalidateDipRect(window, SettingsFlyoutLayout.GetSplendidPopupItemRect(selector, currentIndex));
+        return true;
+    }
+
+    private static int GetSplendidSelectionIndex(SplendidProfileSelector selector) => selector switch
+    {
+        SplendidProfileSelector.VisualMode => GetSplendidVisualModeIndex(_splendidVisualMode),
+        SplendidProfileSelector.GamutMode => GetSplendidGamutModeIndex(_splendidGamutMode),
+        SplendidProfileSelector.ColorTemperature => GetSplendidColorTemperatureIndex(_splendidColorTemperature),
+        _ => throw new ArgumentOutOfRangeException(nameof(selector), selector, "Unsupported Splendid selector."),
+    };
+
+    private static int GetSplendidVisualModeIndex(SplendidVisualMode visualMode) => visualMode switch
+    {
+        SplendidVisualMode.Default => 0,
+        SplendidVisualMode.Vivid => 1,
+        SplendidVisualMode.Racing => 2,
+        SplendidVisualMode.Scenery => 3,
+        SplendidVisualMode.Rts => 4,
+        SplendidVisualMode.Fps => 5,
+        SplendidVisualMode.Cinema => 6,
+        SplendidVisualMode.EyeCare => 7,
+        SplendidVisualMode.EReading => 8,
+        _ => 9,
+    };
+
+    private static int GetSplendidGamutModeIndex(SplendidGamutMode gamutMode) => gamutMode switch
+    {
+        SplendidGamutMode.Native => 0,
+        SplendidGamutMode.SRgb => 1,
+        SplendidGamutMode.DciP3 => 2,
+        SplendidGamutMode.DisplayP3 => 3,
+        _ => 0,
+    };
+
+    private static int GetSplendidColorTemperatureIndex(SplendidColorTemperature colorTemperature) =>
+        colorTemperature switch
+        {
+            SplendidColorTemperature.Warmest => 0,
+            SplendidColorTemperature.Warmer => 1,
+            SplendidColorTemperature.Warm => 2,
+            SplendidColorTemperature.Neutral => 3,
+            SplendidColorTemperature.Cold => 4,
+            SplendidColorTemperature.Colder => 5,
+            SplendidColorTemperature.Coldest => 6,
+            _ => 3,
+        };
+
+    private static SplendidVisualMode GetSplendidVisualModeAtIndex(int index) => index switch
+    {
+        0 => SplendidVisualMode.Default,
+        1 => SplendidVisualMode.Vivid,
+        2 => SplendidVisualMode.Racing,
+        3 => SplendidVisualMode.Scenery,
+        4 => SplendidVisualMode.Rts,
+        5 => SplendidVisualMode.Fps,
+        6 => SplendidVisualMode.Cinema,
+        7 => SplendidVisualMode.EyeCare,
+        8 => SplendidVisualMode.EReading,
+        _ => SplendidVisualMode.Disabled,
+    };
+
+    private static SplendidGamutMode GetSplendidGamutModeAtIndex(int index) => index switch
+    {
+        0 => SplendidGamutMode.Native,
+        1 => SplendidGamutMode.SRgb,
+        2 => SplendidGamutMode.DciP3,
+        _ => SplendidGamutMode.DisplayP3,
+    };
+
+    private static SplendidColorTemperature GetSplendidColorTemperatureAtIndex(int index) => index switch
+    {
+        0 => SplendidColorTemperature.Warmest,
+        1 => SplendidColorTemperature.Warmer,
+        2 => SplendidColorTemperature.Warm,
+        3 => SplendidColorTemperature.Neutral,
+        4 => SplendidColorTemperature.Cold,
+        5 => SplendidColorTemperature.Colder,
+        _ => SplendidColorTemperature.Coldest,
+    };
+
+    private static void ApplySplendidPopupSelection(
+        IntPtr window,
+        SplendidProfileSelector selector,
+        int index)
+    {
+        switch (selector)
+        {
+            case SplendidProfileSelector.VisualMode:
+                SetSplendidVisualMode(window, GetSplendidVisualModeAtIndex(index));
+                break;
+            case SplendidProfileSelector.GamutMode:
+                SetSplendidGamutMode(window, GetSplendidGamutModeAtIndex(index));
+                break;
+            case SplendidProfileSelector.ColorTemperature:
+                SetSplendidColorTemperature(window, GetSplendidColorTemperatureAtIndex(index));
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(selector), selector, "Unsupported Splendid selector.");
+        }
+    }
+
     private static void UpdateValueFromMouse(IntPtr window, int mouseX)
     {
         var dpi = GetDpiForWindow(window);
@@ -878,6 +1205,91 @@ internal static class SettingsFlyoutWindow
         }
     }
 
+    private static void SetSplendidVisualMode(IntPtr window, SplendidVisualMode visualMode)
+    {
+        if (_splendidVisualMode == visualMode)
+        {
+            return;
+        }
+
+        var disabledStateChanged =
+            (_splendidVisualMode == SplendidVisualMode.Disabled) !=
+            (visualMode == SplendidVisualMode.Disabled);
+        _splendidVisualMode = visualMode;
+        ClearStatus(window);
+        InvalidateDipRect(window, SettingsFlyoutLayout.SplendidVisualSelectorRect);
+        if (disabledStateChanged)
+        {
+            InvalidateDipRect(window, SettingsFlyoutLayout.SplendidGamutSelectorRect);
+            InvalidateDipRect(window, SettingsFlyoutLayout.SplendidTemperatureSelectorRect);
+        }
+    }
+
+    private static void SetSplendidGamutMode(IntPtr window, SplendidGamutMode gamutMode)
+    {
+        if (_splendidGamutMode == gamutMode)
+        {
+            return;
+        }
+
+        _splendidGamutMode = gamutMode;
+        ClearStatus(window);
+        InvalidateDipRect(window, SettingsFlyoutLayout.SplendidGamutSelectorRect);
+    }
+
+    private static void SetSplendidColorTemperature(
+        IntPtr window,
+        SplendidColorTemperature colorTemperature)
+    {
+        if (_splendidColorTemperature == colorTemperature)
+        {
+            return;
+        }
+
+        _splendidColorTemperature = colorTemperature;
+        ClearStatus(window);
+        InvalidateDipRect(window, SettingsFlyoutLayout.SplendidTemperatureSelectorRect);
+    }
+
+    private static void ClearStatus(IntPtr window)
+    {
+        var hadStatusText = !string.IsNullOrWhiteSpace(_statusText);
+        _statusText = null;
+        if (hadStatusText)
+        {
+            InvalidateDipRect(window, SettingsFlyoutLayout.StatusRect);
+        }
+    }
+
+    private static bool CanEditSplendidSelector(SplendidProfileSelector selector) =>
+        CanEdit() &&
+        (selector == SplendidProfileSelector.VisualMode ||
+         _splendidVisualMode != SplendidVisualMode.Disabled);
+
+    private static SettingsFlyoutFocusedControl GetFocusedControl(SplendidProfileSelector selector) =>
+        selector switch
+        {
+            SplendidProfileSelector.VisualMode => SettingsFlyoutFocusedControl.SplendidVisualMode,
+            SplendidProfileSelector.GamutMode => SettingsFlyoutFocusedControl.SplendidGamutMode,
+            SplendidProfileSelector.ColorTemperature => SettingsFlyoutFocusedControl.SplendidColorTemperature,
+            _ => throw new ArgumentOutOfRangeException(nameof(selector), selector, "Unsupported Splendid selector."),
+        };
+
+    private static SettingsFlyoutFocusedControl GetNextFocusedControl(SettingsFlyoutFocusedControl current) =>
+        current switch
+        {
+            SettingsFlyoutFocusedControl.BatteryChargeLimit => SettingsFlyoutFocusedControl.OperatingMode,
+            SettingsFlyoutFocusedControl.OperatingMode => SettingsFlyoutFocusedControl.LaptopDisplayMode,
+            SettingsFlyoutFocusedControl.LaptopDisplayMode => SettingsFlyoutFocusedControl.MiniLedMode,
+            SettingsFlyoutFocusedControl.MiniLedMode => SettingsFlyoutFocusedControl.SplendidVisualMode,
+            SettingsFlyoutFocusedControl.SplendidVisualMode
+                when _splendidVisualMode != SplendidVisualMode.Disabled =>
+                    SettingsFlyoutFocusedControl.SplendidGamutMode,
+            SettingsFlyoutFocusedControl.SplendidGamutMode =>
+                SettingsFlyoutFocusedControl.SplendidColorTemperature,
+            _ => SettingsFlyoutFocusedControl.BatteryChargeLimit,
+        };
+
     private static int NormalizeToStep(int value)
     {
         var clamped = Math.Clamp(value, _minimum, _maximum);
@@ -940,6 +1352,75 @@ internal static class SettingsFlyoutWindow
         return SettingsFlyoutLayout.TryGetMiniLedModeAtPoint(dpi, x, y, out miniLedMode);
     }
 
+    private static bool TryGetSplendidSelectorAtPoint(
+        IntPtr window,
+        int x,
+        int y,
+        out SplendidProfileSelector selector)
+    {
+        var dpi = GetDpiForWindow(window);
+        if (dpi == 0)
+        {
+            dpi = 96;
+        }
+
+        return SettingsFlyoutLayout.TryGetSplendidSelectorAtPoint(dpi, x, y, out selector);
+    }
+
+    private static bool IsSplendidSelectorAtPoint(
+        IntPtr window,
+        SplendidProfileSelector selector,
+        int x,
+        int y) =>
+        TryGetSplendidSelectorAtPoint(window, x, y, out var hitSelector) &&
+        hitSelector == selector;
+
+    private static bool TryGetSplendidPopupIndexAtPoint(
+        IntPtr window,
+        SplendidProfileSelector selector,
+        int x,
+        int y,
+        out int index)
+    {
+        var dpi = GetDpiForWindow(window);
+        if (dpi == 0)
+        {
+            dpi = 96;
+        }
+
+        return SettingsFlyoutLayout.TryGetSplendidPopupIndexAtPoint(dpi, selector, x, y, out index);
+    }
+
+    private static void SetSplendidPopupOpen(IntPtr window, SplendidProfileSelector? selector)
+    {
+        if (_openSplendidPopup == selector)
+        {
+            return;
+        }
+
+        var previousSelector = _openSplendidPopup;
+        _openSplendidPopup = selector;
+        _hoveredSplendidPopupIndex = selector is { } openSelector
+            ? GetSplendidSelectionIndex(openSelector)
+            : null;
+        _pressedSplendidPopupIndex = null;
+
+        if (previousSelector is { } previous)
+        {
+            InvalidateDipRect(window, SettingsFlyoutLayout.GetSplendidSelectorRect(previous));
+            InvalidateDipRect(window, SettingsFlyoutLayout.GetSplendidPopupRect(previous));
+        }
+
+        if (selector is { } current)
+        {
+            InvalidateDipRect(window, SettingsFlyoutLayout.GetSplendidSelectorRect(current));
+            InvalidateDipRect(window, SettingsFlyoutLayout.GetSplendidPopupRect(current));
+        }
+    }
+
+    private static void CloseSplendidPopup(IntPtr window) =>
+        SetSplendidPopupOpen(window, null);
+
     private static void EnsureMouseLeaveTracking(IntPtr window)
     {
         if (_trackingMouseLeave)
@@ -961,9 +1442,23 @@ internal static class SettingsFlyoutWindow
         OperatingModePreset? hoveredOperatingMode = null;
         LaptopDisplayMode? hoveredLaptopDisplayMode = null;
         MiniLedMode? hoveredMiniLedMode = null;
+        SplendidProfileSelector? hoveredSplendidSelector = null;
+        int? hoveredSplendidPopupIndex = null;
+
         if (CanEdit())
         {
-            if (TryGetOperatingModeAtPoint(window, x, y, out var operatingMode))
+            if (_openSplendidPopup is { } openSelector)
+            {
+                if (TryGetSplendidPopupIndexAtPoint(window, openSelector, x, y, out var popupIndex))
+                {
+                    hoveredSplendidPopupIndex = popupIndex;
+                }
+                else if (IsSplendidSelectorAtPoint(window, openSelector, x, y))
+                {
+                    hoveredSplendidSelector = openSelector;
+                }
+            }
+            else if (TryGetOperatingModeAtPoint(window, x, y, out var operatingMode))
             {
                 hoveredOperatingMode = operatingMode;
             }
@@ -975,30 +1470,72 @@ internal static class SettingsFlyoutWindow
             {
                 hoveredMiniLedMode = miniLedMode;
             }
+            else if (TryGetSplendidSelectorAtPoint(window, x, y, out var selector) &&
+                     CanEditSplendidSelector(selector))
+            {
+                hoveredSplendidSelector = selector;
+            }
         }
 
         if (_hoveredOperatingMode != hoveredOperatingMode)
         {
-            var previouslyHoveredOperatingMode = _hoveredOperatingMode;
+            var previous = _hoveredOperatingMode;
             _hoveredOperatingMode = hoveredOperatingMode;
-            InvalidateOperatingModeTile(window, previouslyHoveredOperatingMode);
+            InvalidateOperatingModeTile(window, previous);
             InvalidateOperatingModeTile(window, hoveredOperatingMode);
         }
 
         if (_hoveredLaptopDisplayMode != hoveredLaptopDisplayMode)
         {
-            var previouslyHoveredLaptopDisplayMode = _hoveredLaptopDisplayMode;
+            var previous = _hoveredLaptopDisplayMode;
             _hoveredLaptopDisplayMode = hoveredLaptopDisplayMode;
-            InvalidateLaptopDisplayModeTile(window, previouslyHoveredLaptopDisplayMode);
+            InvalidateLaptopDisplayModeTile(window, previous);
             InvalidateLaptopDisplayModeTile(window, hoveredLaptopDisplayMode);
         }
 
         if (_hoveredMiniLedMode != hoveredMiniLedMode)
         {
-            var previouslyHoveredMiniLedMode = _hoveredMiniLedMode;
+            var previous = _hoveredMiniLedMode;
             _hoveredMiniLedMode = hoveredMiniLedMode;
-            InvalidateMiniLedModeTile(window, previouslyHoveredMiniLedMode);
+            InvalidateMiniLedModeTile(window, previous);
             InvalidateMiniLedModeTile(window, hoveredMiniLedMode);
+        }
+
+        if (_hoveredSplendidSelector != hoveredSplendidSelector)
+        {
+            var previous = _hoveredSplendidSelector;
+            _hoveredSplendidSelector = hoveredSplendidSelector;
+            if (previous is { } previousSelector)
+            {
+                InvalidateDipRect(window, SettingsFlyoutLayout.GetSplendidSelectorRect(previousSelector));
+            }
+
+            if (hoveredSplendidSelector is { } currentSelector)
+            {
+                InvalidateDipRect(window, SettingsFlyoutLayout.GetSplendidSelectorRect(currentSelector));
+            }
+        }
+
+        if (_hoveredSplendidPopupIndex != hoveredSplendidPopupIndex)
+        {
+            var previous = _hoveredSplendidPopupIndex;
+            _hoveredSplendidPopupIndex = hoveredSplendidPopupIndex;
+            if (_openSplendidPopup is { } popupSelector)
+            {
+                if (previous is { } previousIndex)
+                {
+                    InvalidateDipRect(
+                        window,
+                        SettingsFlyoutLayout.GetSplendidPopupItemRect(popupSelector, previousIndex));
+                }
+
+                if (hoveredSplendidPopupIndex is { } currentIndex)
+                {
+                    InvalidateDipRect(
+                        window,
+                        SettingsFlyoutLayout.GetSplendidPopupItemRect(popupSelector, currentIndex));
+                }
+            }
         }
     }
 
@@ -1061,6 +1598,15 @@ internal static class SettingsFlyoutWindow
             case SettingsFlyoutFocusedControl.MiniLedMode:
                 InvalidateMiniLedModeTile(window, _miniLedMode);
                 break;
+            case SettingsFlyoutFocusedControl.SplendidVisualMode:
+                InvalidateDipRect(window, SettingsFlyoutLayout.SplendidVisualSelectorRect);
+                break;
+            case SettingsFlyoutFocusedControl.SplendidGamutMode:
+                InvalidateDipRect(window, SettingsFlyoutLayout.SplendidGamutSelectorRect);
+                break;
+            case SettingsFlyoutFocusedControl.SplendidColorTemperature:
+                InvalidateDipRect(window, SettingsFlyoutLayout.SplendidTemperatureSelectorRect);
+                break;
         }
     }
 
@@ -1100,6 +1646,14 @@ internal static class SettingsFlyoutWindow
             _miniLedMode,
             _hoveredMiniLedMode,
             _pressedMiniLedMode,
+            _splendidVisualMode,
+            _splendidGamutMode,
+            _splendidColorTemperature,
+            _hoveredSplendidSelector,
+            _pressedSplendidSelector,
+            _openSplendidPopup,
+            _hoveredSplendidPopupIndex,
+            _pressedSplendidPopupIndex,
             _isAvailable,
             _isApplying,
             _isDragging,
@@ -1120,12 +1674,16 @@ internal static class SettingsFlyoutWindow
         if (_isDragging ||
             _pressedOperatingMode is not null ||
             _pressedLaptopDisplayMode is not null ||
-            _pressedMiniLedMode is not null)
+            _pressedMiniLedMode is not null ||
+            _pressedSplendidSelector is not null ||
+            _pressedSplendidPopupIndex is not null)
         {
             _isDragging = false;
             _pressedOperatingMode = null;
             _pressedLaptopDisplayMode = null;
             _pressedMiniLedMode = null;
+            _pressedSplendidSelector = null;
+            _pressedSplendidPopupIndex = null;
             ReleaseCapture();
         }
 
@@ -1134,6 +1692,9 @@ internal static class SettingsFlyoutWindow
         _hoveredOperatingMode = null;
         _hoveredLaptopDisplayMode = null;
         _hoveredMiniLedMode = null;
+        _hoveredSplendidSelector = null;
+        _openSplendidPopup = null;
+        _hoveredSplendidPopupIndex = null;
         _trackingMouseLeave = false;
 
         if (commitPendingChange &&
@@ -1141,7 +1702,10 @@ internal static class SettingsFlyoutWindow
             (_value != _committedValue ||
              _operatingMode != _committedOperatingMode ||
              _laptopDisplayMode != _committedLaptopDisplayMode ||
-             _miniLedMode != _committedMiniLedMode))
+             _miniLedMode != _committedMiniLedMode ||
+             _splendidVisualMode != _committedSplendidVisualMode ||
+             _splendidGamutMode != _committedSplendidGamutMode ||
+             _splendidColorTemperature != _committedSplendidColorTemperature))
         {
             _closeAfterOperation = true;
             BeginApply(window);
@@ -1156,6 +1720,9 @@ internal static class SettingsFlyoutWindow
             _operatingMode = _committedOperatingMode;
             _laptopDisplayMode = _committedLaptopDisplayMode;
             _miniLedMode = _committedMiniLedMode;
+            _splendidVisualMode = _committedSplendidVisualMode;
+            _splendidGamutMode = _committedSplendidGamutMode;
+            _splendidColorTemperature = _committedSplendidColorTemperature;
         }
 
         if (_isLoading || _isApplying)
@@ -1502,6 +2069,17 @@ internal static class SettingsFlyoutWindow
         _committedMiniLedMode = MiniLedMode.MultiZone;
         _hoveredMiniLedMode = null;
         _pressedMiniLedMode = null;
+        _splendidVisualMode = SplendidVisualMode.Default;
+        _committedSplendidVisualMode = SplendidVisualMode.Default;
+        _splendidGamutMode = SplendidGamutMode.Native;
+        _committedSplendidGamutMode = SplendidGamutMode.Native;
+        _splendidColorTemperature = SplendidColorTemperature.Neutral;
+        _committedSplendidColorTemperature = SplendidColorTemperature.Neutral;
+        _hoveredSplendidSelector = null;
+        _pressedSplendidSelector = null;
+        _openSplendidPopup = null;
+        _hoveredSplendidPopupIndex = null;
+        _pressedSplendidPopupIndex = null;
         _focusedControl = SettingsFlyoutFocusedControl.BatteryChargeLimit;
         _isAvailable = false;
         _isLoading = false;

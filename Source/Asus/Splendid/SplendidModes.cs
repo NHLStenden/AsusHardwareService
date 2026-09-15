@@ -40,3 +40,28 @@ internal enum SplendidVisualMode
     /// <summary>Uses the e-reading visual preset.</summary>
     EReading = 212,
 }
+
+/// <summary>Color-temperature presets understood by ASUS Splendid.</summary>
+internal enum SplendidColorTemperature
+{
+    /// <summary>Uses the warmest supported white balance.</summary>
+    Warmest = 0,
+
+    /// <summary>Uses a strongly warm white balance.</summary>
+    Warmer = 15,
+
+    /// <summary>Uses a warm white balance.</summary>
+    Warm = 30,
+
+    /// <summary>Uses the neutral ASUS Splendid white balance.</summary>
+    Neutral = 50,
+
+    /// <summary>Uses a cool white balance.</summary>
+    Cold = 70,
+
+    /// <summary>Uses a strongly cool white balance.</summary>
+    Colder = 85,
+
+    /// <summary>Uses the coldest supported white balance.</summary>
+    Coldest = 100,
+}

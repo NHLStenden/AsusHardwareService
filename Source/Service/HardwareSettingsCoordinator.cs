@@ -1,6 +1,7 @@
 using AsusHardwareService.Asus.Battery;
 using AsusHardwareService.Asus.Display;
 using AsusHardwareService.Asus.Performance;
+using AsusHardwareService.Asus.Splendid;
 using AsusHardwareService.Configuration;
 using AsusHardwareService.Settings;
 using AsusHardwareService.Windows.Sessions;
@@ -30,6 +31,7 @@ internal sealed class HardwareSettingsCoordinator : IDisposable
     private readonly BatteryChargeLimiter _batteryChargeLimiter;
     private readonly OperatingModeController _operatingModeController;
     private readonly LaptopDisplayController _laptopDisplayController;
+    private readonly SplendidProfileApplier _splendidProfileApplier;
     private readonly UserSessionService _userSessionService;
     private readonly MutableHardwareSettingsStore _settingsStore;
     private readonly SemaphoreSlim _updateLock = new(1, 1);
@@ -37,6 +39,9 @@ internal sealed class HardwareSettingsCoordinator : IDisposable
     private int _batteryChargeLimitPercent;
     private int _laptopDisplayMode;
     private int _miniLedMode;
+    private int _splendidVisualMode;
+    private int _splendidGamutMode;
+    private int _splendidColorTemperature;
 
     /// <summary>Initializes the service-owned mutable settings coordinator.</summary>
     public HardwareSettingsCoordinator(
@@ -44,6 +49,7 @@ internal sealed class HardwareSettingsCoordinator : IDisposable
         BatteryChargeLimiter batteryChargeLimiter,
         OperatingModeController operatingModeController,
         LaptopDisplayController laptopDisplayController,
+        SplendidProfileApplier splendidProfileApplier,
         UserSessionService userSessionService,
         MutableHardwareSettingsStore settingsStore,
         IOptionsMonitor<HardwareOptions> options)
@@ -52,6 +58,7 @@ internal sealed class HardwareSettingsCoordinator : IDisposable
         _batteryChargeLimiter = batteryChargeLimiter ?? throw new ArgumentNullException(nameof(batteryChargeLimiter));
         _operatingModeController = operatingModeController ?? throw new ArgumentNullException(nameof(operatingModeController));
         _laptopDisplayController = laptopDisplayController ?? throw new ArgumentNullException(nameof(laptopDisplayController));
+        _splendidProfileApplier = splendidProfileApplier ?? throw new ArgumentNullException(nameof(splendidProfileApplier));
         _userSessionService = userSessionService ?? throw new ArgumentNullException(nameof(userSessionService));
         _settingsStore = settingsStore ?? throw new ArgumentNullException(nameof(settingsStore));
         ArgumentNullException.ThrowIfNull(options);
@@ -60,6 +67,9 @@ internal sealed class HardwareSettingsCoordinator : IDisposable
             options.CurrentValue.BatteryChargeLimitPercent);
         _laptopDisplayMode = (int)options.CurrentValue.LaptopDisplayMode;
         _miniLedMode = (int)options.CurrentValue.MiniLedMode;
+        _splendidVisualMode = (int)options.CurrentValue.SplendidVisualMode;
+        _splendidGamutMode = (int)options.CurrentValue.SplendidGamutMode;
+        _splendidColorTemperature = options.CurrentValue.ColorTemperature;
         _optionsSubscription = options.OnChange((value, _) =>
         {
             Interlocked.Exchange(
@@ -67,6 +77,9 @@ internal sealed class HardwareSettingsCoordinator : IDisposable
                 BatteryChargeLimitPolicy.Normalize(value.BatteryChargeLimitPercent));
             Interlocked.Exchange(ref _laptopDisplayMode, (int)value.LaptopDisplayMode);
             Interlocked.Exchange(ref _miniLedMode, (int)value.MiniLedMode);
+            Interlocked.Exchange(ref _splendidVisualMode, (int)value.SplendidVisualMode);
+            Interlocked.Exchange(ref _splendidGamutMode, (int)value.SplendidGamutMode);
+            Interlocked.Exchange(ref _splendidColorTemperature, value.ColorTemperature);
         });
     }
 
@@ -83,7 +96,10 @@ internal sealed class HardwareSettingsCoordinator : IDisposable
                 BatteryChargeLimitPolicy.StepPercent),
             _operatingModeController.CurrentMode.ToPreset(),
             (LaptopDisplayMode)Volatile.Read(ref _laptopDisplayMode),
-            (MiniLedMode)Volatile.Read(ref _miniLedMode));
+            (MiniLedMode)Volatile.Read(ref _miniLedMode),
+            (SplendidVisualMode)Volatile.Read(ref _splendidVisualMode),
+            (SplendidGamutMode)Volatile.Read(ref _splendidGamutMode),
+            (SplendidColorTemperature)Volatile.Read(ref _splendidColorTemperature));
     }
 
     /// <summary>Validates, persists, and applies a partial user settings update.</summary>
@@ -123,6 +139,24 @@ internal sealed class HardwareSettingsCoordinator : IDisposable
             !Enum.IsDefined(typeof(MiniLedMode), miniLedMode))
         {
             return Failure("Unsupported MiniLED mode.");
+        }
+
+        if (patch.SplendidVisualMode is { } splendidVisualMode &&
+            !Enum.IsDefined(typeof(SplendidVisualMode), splendidVisualMode))
+        {
+            return Failure("Unsupported visual mode.");
+        }
+
+        if (patch.SplendidGamutMode is { } splendidGamutMode &&
+            !Enum.IsDefined(typeof(SplendidGamutMode), splendidGamutMode))
+        {
+            return Failure("Unsupported color gamut.");
+        }
+
+        if (patch.SplendidColorTemperature is { } splendidColorTemperature &&
+            !Enum.IsDefined(typeof(SplendidColorTemperature), splendidColorTemperature))
+        {
+            return Failure("Unsupported color temperature.");
         }
 
         await _updateLock.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -188,7 +222,50 @@ internal sealed class HardwareSettingsCoordinator : IDisposable
                 }
             }
 
-            if (chargeLimitApplied && operatingModeApplied && laptopDisplayModeApplied && miniLedModeApplied)
+            var splendidProfileApplied = true;
+            var splendidProfileRequested =
+                patch.SplendidVisualMode.HasValue ||
+                patch.SplendidGamutMode.HasValue ||
+                patch.SplendidColorTemperature.HasValue;
+            if (splendidProfileRequested)
+            {
+                if (patch.SplendidVisualMode is { } requestedSplendidVisualMode)
+                {
+                    Interlocked.Exchange(ref _splendidVisualMode, (int)requestedSplendidVisualMode);
+                }
+
+                if (patch.SplendidGamutMode is { } requestedSplendidGamutMode)
+                {
+                    Interlocked.Exchange(ref _splendidGamutMode, (int)requestedSplendidGamutMode);
+                }
+
+                if (patch.SplendidColorTemperature is { } requestedSplendidColorTemperature)
+                {
+                    Interlocked.Exchange(ref _splendidColorTemperature, (int)requestedSplendidColorTemperature);
+                }
+
+                var session = _userSessionService.GetActiveSession();
+                splendidProfileApplied = session is not null &&
+                    await _splendidProfileApplier
+                        .ApplyProfileAsync(
+                            session.SessionId,
+                            (SplendidVisualMode)Volatile.Read(ref _splendidVisualMode),
+                            (SplendidGamutMode)Volatile.Read(ref _splendidGamutMode),
+                            (SplendidColorTemperature)Volatile.Read(ref _splendidColorTemperature),
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                if (!splendidProfileApplied)
+                {
+                    _logger.LogWarning(
+                        "ASUS Splendid profile was persisted but could not be applied immediately.");
+                }
+            }
+
+            if (chargeLimitApplied &&
+                operatingModeApplied &&
+                laptopDisplayModeApplied &&
+                miniLedModeApplied &&
+                splendidProfileApplied)
             {
                 return Success();
             }
@@ -197,7 +274,8 @@ internal sealed class HardwareSettingsCoordinator : IDisposable
                 (patch.BatteryChargeLimitPercent.HasValue ? 1 : 0) +
                 (patch.OperatingMode.HasValue ? 1 : 0) +
                 (patch.LaptopDisplayMode.HasValue ? 1 : 0) +
-                (patch.MiniLedMode.HasValue ? 1 : 0);
+                (patch.MiniLedMode.HasValue ? 1 : 0) +
+                (splendidProfileRequested ? 1 : 0);
             if (requestedSettingCount > 1)
             {
                 return Failure("Saved; some settings were not applied.");
@@ -209,7 +287,9 @@ internal sealed class HardwareSettingsCoordinator : IDisposable
                     ? "Saved; operating mode was not applied."
                     : !laptopDisplayModeApplied
                         ? "Saved; laptop screen mode was not applied."
-                        : "Saved; MiniLED mode was not applied.");
+                        : !miniLedModeApplied
+                            ? "Saved; MiniLED mode was not applied."
+                            : "Saved; visual profile was not applied.");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

@@ -1,5 +1,6 @@
 using AsusHardwareService.Asus.Display;
 using AsusHardwareService.Asus.Performance;
+using AsusHardwareService.Asus.Splendid;
 using AsusHardwareService.Presentation.Osd;
 using static AsusHardwareService.Presentation.Osd.OsdNativeMethods;
 
@@ -19,6 +20,28 @@ internal enum SettingsFlyoutFocusedControl
 
     /// <summary>The mutually-exclusive MiniLED local-dimming selector.</summary>
     MiniLedMode,
+
+    /// <summary>The ASUS Splendid visual-preset selector.</summary>
+    SplendidVisualMode,
+
+    /// <summary>The ASUS Splendid color-gamut selector.</summary>
+    SplendidGamutMode,
+
+    /// <summary>The ASUS Splendid color-temperature selector.</summary>
+    SplendidColorTemperature,
+}
+
+/// <summary>Identifies one selector inside the grouped ASUS Splendid visual profile.</summary>
+internal enum SplendidProfileSelector
+{
+    /// <summary>The GameVisual preset selector.</summary>
+    VisualMode,
+
+    /// <summary>The color-gamut selector.</summary>
+    GamutMode,
+
+    /// <summary>The color-temperature selector.</summary>
+    ColorTemperature,
 }
 
 /// <summary>DPI-independent geometry for the interactive Windows 11-style settings fly-out.</summary>
@@ -28,7 +51,7 @@ internal static class SettingsFlyoutLayout
     // Quick Settings tile rhythm, so the fly-out grows vertically rather than compressing labels
     // into command-button rectangles.
     internal const double WidthDip = 360.0;
-    internal const double HeightDip = 438.0;
+    internal const double HeightDip = 604.0;
     internal const double EdgeMarginDip = 12.0;
 
     internal static readonly DipRect TitleRect = new(20.0, 12.0, 292.0, 38.0);
@@ -63,7 +86,27 @@ internal static class SettingsFlyoutLayout
     internal static readonly DipRect MiniLedOneZoneLabelRect = new(20.0, 384.0, 120.0, 408.0);
     internal static readonly DipRect MiniLedMultiZoneLabelRect = new(130.0, 384.0, 230.0, 408.0);
     internal static readonly DipRect MiniLedStrongLabelRect = new(240.0, 384.0, 340.0, 408.0);
-    internal static readonly DipRect StatusRect = new(20.0, 414.0, 340.0, 436.0);
+
+    // ASUS Splendid is one composed display-color profile. Windows 11 settings commonly present
+    // related choices as compact setting rows, so keep visual mode, gamut, and white balance
+    // together rather than making one option look like an isolated top-level feature.
+    internal static readonly DipRect SplendidTitleRect = new(20.0, 414.0, 340.0, 438.0);
+    internal static readonly DipRect SplendidVisualSelectorRect = new(20.0, 442.0, 340.0, 482.0);
+    internal static readonly DipRect SplendidGamutSelectorRect = new(20.0, 486.0, 340.0, 526.0);
+    internal static readonly DipRect SplendidTemperatureSelectorRect = new(20.0, 530.0, 340.0, 570.0);
+    internal static readonly DipRect SplendidVisualLabelRect = new(32.0, 442.0, 170.0, 482.0);
+    internal static readonly DipRect SplendidGamutLabelRect = new(32.0, 486.0, 170.0, 526.0);
+    internal static readonly DipRect SplendidTemperatureLabelRect = new(32.0, 530.0, 170.0, 570.0);
+    internal static readonly DipRect SplendidVisualValueRect = new(170.0, 442.0, 300.0, 482.0);
+    internal static readonly DipRect SplendidGamutValueRect = new(170.0, 486.0, 300.0, 526.0);
+    internal static readonly DipRect SplendidTemperatureValueRect = new(170.0, 530.0, 300.0, 570.0);
+    internal static readonly DipRect SplendidVisualChevronRect = new(300.0, 442.0, 332.0, 482.0);
+    internal static readonly DipRect SplendidGamutChevronRect = new(300.0, 486.0, 332.0, 526.0);
+    internal static readonly DipRect SplendidTemperatureChevronRect = new(300.0, 530.0, 332.0, 570.0);
+    internal static readonly DipRect SplendidPopupAreaRect = new(20.0, 102.0, 340.0, 438.0);
+    internal const double SplendidPopupPaddingDip = 8.0;
+    internal const double SplendidPopupItemHeightDip = 32.0;
+    internal static readonly DipRect StatusRect = new(20.0, 576.0, 340.0, 598.0);
 
     /// <summary>Returns a touch-friendly hit target around the visible slider track.</summary>
     internal static PixelRect GetSliderHitRect(uint dpi)
@@ -245,6 +288,107 @@ internal static class SettingsFlyoutLayout
         return new DipRect(tile.Left, tile.Top, tile.Right, label.Bottom);
     }
 
+    /// <summary>Returns the setting-row geometry for one ASUS Splendid profile selector.</summary>
+    internal static DipRect GetSplendidSelectorRect(SplendidProfileSelector selector) => selector switch
+    {
+        SplendidProfileSelector.VisualMode => SplendidVisualSelectorRect,
+        SplendidProfileSelector.GamutMode => SplendidGamutSelectorRect,
+        SplendidProfileSelector.ColorTemperature => SplendidTemperatureSelectorRect,
+        _ => throw new ArgumentOutOfRangeException(nameof(selector), selector, "Unsupported Splendid selector."),
+    };
+
+    /// <summary>Returns the value-text geometry for one ASUS Splendid profile selector.</summary>
+    internal static DipRect GetSplendidValueRect(SplendidProfileSelector selector) => selector switch
+    {
+        SplendidProfileSelector.VisualMode => SplendidVisualValueRect,
+        SplendidProfileSelector.GamutMode => SplendidGamutValueRect,
+        SplendidProfileSelector.ColorTemperature => SplendidTemperatureValueRect,
+        _ => throw new ArgumentOutOfRangeException(nameof(selector), selector, "Unsupported Splendid selector."),
+    };
+
+    /// <summary>Returns the chevron geometry for one ASUS Splendid profile selector.</summary>
+    internal static DipRect GetSplendidChevronRect(SplendidProfileSelector selector) => selector switch
+    {
+        SplendidProfileSelector.VisualMode => SplendidVisualChevronRect,
+        SplendidProfileSelector.GamutMode => SplendidGamutChevronRect,
+        SplendidProfileSelector.ColorTemperature => SplendidTemperatureChevronRect,
+        _ => throw new ArgumentOutOfRangeException(nameof(selector), selector, "Unsupported Splendid selector."),
+    };
+
+    /// <summary>Returns the ASUS Splendid selector under the supplied client point, when present.</summary>
+    internal static bool TryGetSplendidSelectorAtPoint(
+        uint dpi,
+        int x,
+        int y,
+        out SplendidProfileSelector selector)
+    {
+        foreach (var candidate in Enum.GetValues<SplendidProfileSelector>())
+        {
+            if (Contains(OsdLayout.ToPixels(GetSplendidSelectorRect(candidate), dpi), x, y))
+            {
+                selector = candidate;
+                return true;
+            }
+        }
+
+        selector = default;
+        return false;
+    }
+
+    /// <summary>Returns the popup geometry for one ASUS Splendid profile selector.</summary>
+    internal static DipRect GetSplendidPopupRect(SplendidProfileSelector selector)
+    {
+        var itemCount = GetSplendidPopupItemCount(selector);
+        var height = (itemCount * SplendidPopupItemHeightDip) + (2.0 * SplendidPopupPaddingDip);
+        return new DipRect(
+            SplendidPopupAreaRect.Left,
+            SplendidPopupAreaRect.Bottom - height,
+            SplendidPopupAreaRect.Right,
+            SplendidPopupAreaRect.Bottom);
+    }
+
+    /// <summary>Returns the number of choices displayed by one ASUS Splendid selector.</summary>
+    internal static int GetSplendidPopupItemCount(SplendidProfileSelector selector) => selector switch
+    {
+        SplendidProfileSelector.VisualMode => 10,
+        SplendidProfileSelector.GamutMode => 4,
+        SplendidProfileSelector.ColorTemperature => 7,
+        _ => throw new ArgumentOutOfRangeException(nameof(selector), selector, "Unsupported Splendid selector."),
+    };
+
+    /// <summary>Returns the popup-row geometry for one ASUS Splendid choice.</summary>
+    internal static DipRect GetSplendidPopupItemRect(SplendidProfileSelector selector, int index)
+    {
+        var popup = GetSplendidPopupRect(selector);
+        var top = popup.Top + SplendidPopupPaddingDip + (index * SplendidPopupItemHeightDip);
+        return new DipRect(
+            popup.Left + SplendidPopupPaddingDip,
+            top,
+            popup.Right - SplendidPopupPaddingDip,
+            top + SplendidPopupItemHeightDip);
+    }
+
+    /// <summary>Returns the zero-based popup row under the supplied client point.</summary>
+    internal static bool TryGetSplendidPopupIndexAtPoint(
+        uint dpi,
+        SplendidProfileSelector selector,
+        int x,
+        int y,
+        out int index)
+    {
+        for (var candidate = 0; candidate < GetSplendidPopupItemCount(selector); candidate++)
+        {
+            if (Contains(OsdLayout.ToPixels(GetSplendidPopupItemRect(selector, candidate), dpi), x, y))
+            {
+                index = candidate;
+                return true;
+            }
+        }
+
+        index = -1;
+        return false;
+    }
+
     private static bool Contains(PixelRect rect, int x, int y) =>
         x >= rect.Left && x <= rect.Right && y >= rect.Top && y <= rect.Bottom;
 }
@@ -263,6 +407,14 @@ internal readonly record struct SettingsFlyoutViewModel(
     MiniLedMode MiniLedMode,
     MiniLedMode? HoveredMiniLedMode,
     MiniLedMode? PressedMiniLedMode,
+    SplendidVisualMode SplendidVisualMode,
+    SplendidGamutMode SplendidGamutMode,
+    SplendidColorTemperature SplendidColorTemperature,
+    SplendidProfileSelector? HoveredSplendidSelector,
+    SplendidProfileSelector? PressedSplendidSelector,
+    SplendidProfileSelector? OpenSplendidPopup,
+    int? HoveredSplendidPopupIndex,
+    int? PressedSplendidPopupIndex,
     bool IsAvailable,
     bool IsApplying,
     bool IsDragging,
