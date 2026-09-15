@@ -7,7 +7,7 @@ using Microsoft.Extensions.Options;
 
 namespace AsusHardwareService.Asus.Battery;
 
-/// <summary>Applies the configured ASUS battery charge ceiling through ACPI.</summary>
+/// <summary>Applies the configured ASUS battery charge ceiling using ACPI.</summary>
 internal sealed class BatteryChargeLimiter
 {
     private static readonly TimeSpan ServiceStateTimeout = TimeSpan.FromSeconds(30);

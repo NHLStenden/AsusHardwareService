@@ -3,12 +3,12 @@ using Microsoft.Extensions.Logging;
 
 namespace AsusHardwareService.Asus.Hid;
 
-/// <summary>Writes ASUS keyboard-backlight levels through the vendor HID feature report.</summary>
+/// <summary>Writes ASUS keyboard-backlight levels using HID feature reports.</summary>
 internal sealed class AsusKeyboardBacklightWriter
 {
     private readonly ILogger<AsusKeyboardBacklightWriter> _logger;
 
-    /// <summary>Initializes the ASUS keyboard-backlight HID writer.</summary>
+    /// <summary>Initializes a new instance of the <see cref="AsusKeyboardBacklightWriter"/> class.</summary>
     public AsusKeyboardBacklightWriter(ILogger<AsusKeyboardBacklightWriter> logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));

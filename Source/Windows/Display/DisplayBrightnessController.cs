@@ -5,7 +5,7 @@ using Microsoft.Extensions.Options;
 
 namespace AsusHardwareService.Windows.Display;
 
-/// <summary>Controls built-in panel brightness through Windows WMI.</summary>
+/// <summary>Controls built-in panel brightness using WMI.</summary>
 internal sealed class DisplayBrightnessController
 {
     private const string WmiNamespace = @"\\.\root\wmi";
@@ -18,7 +18,7 @@ internal sealed class DisplayBrightnessController
     private readonly ILogger<DisplayBrightnessController> _logger;
     private readonly IOptionsMonitor<HardwareOptions> _options;
 
-    /// <summary>Initializes the WMI display-brightness adapter.</summary>
+    /// <summary>Initializes a new instance of the <see cref="DisplayBrightnessController"/> class.</summary>
     public DisplayBrightnessController(
         ILogger<DisplayBrightnessController> logger,
         IOptionsMonitor<HardwareOptions> options)
@@ -27,10 +27,10 @@ internal sealed class DisplayBrightnessController
         _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
-    /// <summary>Increases built-in display brightness by the configured percentage step.</summary>
+    /// <summary>Increases built-in display brightness by the brightness step.</summary>
     public int Increase() => Adjust(Math.Abs(_options.CurrentValue.DisplayBrightnessStepPercent));
 
-    /// <summary>Decreases built-in display brightness by the configured percentage step.</summary>
+    /// <summary>Decreases built-in display brightness by the brightness step.</summary>
     public int Decrease() => Adjust(-Math.Abs(_options.CurrentValue.DisplayBrightnessStepPercent));
 
     private int Adjust(int delta)

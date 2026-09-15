@@ -23,7 +23,7 @@ internal enum PerformanceMode
     Silent = 2,
 }
 
-/// <summary>Named operating-mode presets exposed by the interactive settings UI.</summary>
+/// <summary>Defines operating mode presets.</summary>
 internal enum OperatingModePreset
 {
     /// <summary>Uses the silent performance profile with the discrete GPU disabled.</summary>
@@ -36,25 +36,24 @@ internal enum OperatingModePreset
     Turbo = 2,
 }
 
-/// <summary>Represents the paired performance/GPU state used by the service hotkey.</summary>
-/// <remarks>The interactive settings UI also uses these pairs for its named operating-mode presets.</remarks>
+/// <summary>Represents a performance and GPU mode pair.</summary>
 /// <param name="Performance">The ASUS platform performance profile.</param>
 /// <param name="Gpu">The ASUS GPU operating mode.</param>
 internal readonly record struct HardwareOperatingMode(PerformanceMode Performance, GpuMode Gpu)
 {
-    /// <summary>The low-power pair used by the two-state toggle.</summary>
+    /// <summary>Gets the low-power mode pair.</summary>
     public static HardwareOperatingMode LowPower { get; } = new(PerformanceMode.Silent, GpuMode.Eco);
 
-    /// <summary>The normal-performance pair used by the two-state toggle.</summary>
+    /// <summary>Gets the standard mode pair.</summary>
     public static HardwareOperatingMode Normal { get; } = new(PerformanceMode.Balanced, GpuMode.Standard);
 
-    /// <summary>The Turbo settings preset. Turbo is intentionally not part of the hardware-hotkey cycle.</summary>
+    /// <summary>Gets the Turbo mode pair.</summary>
     public static HardwareOperatingMode Turbo { get; } = new(PerformanceMode.Turbo, GpuMode.Standard);
 
-    /// <summary>Returns the other supported pair in the two-state toggle cycle.</summary>
+    /// <summary>Gets the other supported pair in the two-state toggle cycle.</summary>
     public HardwareOperatingMode Toggle() => this == LowPower ? Normal : LowPower;
 
-    /// <summary>Returns the hardware pair represented by an interactive settings preset.</summary>
+    /// <summary>Gets the hardware pair represented by an interactive settings preset.</summary>
     public static HardwareOperatingMode FromPreset(OperatingModePreset preset) => preset switch
     {
         OperatingModePreset.Eco => LowPower,
@@ -63,7 +62,7 @@ internal readonly record struct HardwareOperatingMode(PerformanceMode Performanc
         _ => throw new ArgumentOutOfRangeException(nameof(preset), preset, "Unsupported operating-mode preset."),
     };
 
-    /// <summary>Returns the interactive settings preset for this exact hardware pair, when one exists.</summary>
+    /// <summary>Gets the interactive settings preset for this exact hardware pair, when one exists.</summary>
     public OperatingModePreset? ToPreset()
     {
         if (this == LowPower)

@@ -44,7 +44,6 @@ internal static class OsdTheme
             return GetSysColor(ColorWindowText);
         }
 
-        // Approximate WinUI TextFillColorSecondaryBrush on the fly-out fallback surface.
         return _isDarkTheme ? Rgb(201, 201, 201) : Rgb(92, 92, 92);
     }
 
@@ -55,9 +54,6 @@ internal static class OsdTheme
             return ColorRefToOpaqueArgb(GetSysColor(ColorWindowText));
         }
 
-        // Public WinUI semantic token ControlStrongStrokeColorDefault. The stock WinUI
-        // ProgressBar also uses this resource for ProgressBarBackground. Keep the alpha: on an
-        // Acrylic surface the native track is backdrop-tinted, not an opaque pre-flattened gray.
         return _isDarkTheme ? 0x8BFFFFFFu : 0x72000000u;
     }
 
@@ -102,11 +98,6 @@ internal static class OsdTheme
             return GetSysColor(ColorHighlight);
         }
 
-        // Use the same semantic accent shades as WinUI's AccentFillColorDefaultBrush:
-        // dark theme -> SystemAccentColorLight2, light theme -> SystemAccentColorDark1.
-        // AccentPalette order is Light3, Light2, Light1, Accent, Dark1, Dark2, Dark3, Extra.
-        // Therefore the dark value is slot 1, not slot 2 (Light1). Light2 is the slightly
-        // aqua/cyan-tinted Windows 11 fill visible in the native hardware flyout.
         var accentShadeIndex = _isDarkTheme ? AccentPaletteLight2 : AccentPaletteDark1;
         if (TryReadAccentPaletteColor(accentShadeIndex, out var themedAccent))
         {
@@ -168,8 +159,7 @@ internal static class OsdTheme
 
     private static IndicatorPosition ReadIndicatorPosition()
     {
-        // This is a shell preference rather than an app contract. Read it best-effort and keep
-        // bottom-centre as the stable fallback if a Windows build does not expose the value.
+        // This is a shell preference rather than an app contract.
         if (!TryReadRegistryDword(
                 IndicatorPositionRegistryPath,
                 IndicatorPositionRegistryValue,
@@ -234,7 +224,6 @@ internal static class OsdTheme
         DwmSetWindowAttribute(window, DwmwaWindowCornerPreference, ref cornerPreference, sizeof(int));
 
         // AccentPolicy can make DWM choose a brighter generic outline than the Shell flyout edge.
-        // Set the edge explicitly in both themes; high contrast returns ownership to the system.
         var borderColor = _highContrast ? DwmColorDefault : DwmColorNone;
         DwmSetWindowAttribute(window, DwmwaBorderColor, ref borderColor, sizeof(int));
 
@@ -262,9 +251,6 @@ internal static class OsdTheme
 
         if (_isDarkTheme)
         {
-            // DWMSBT_TRANSIENTWINDOW does not expose the material's tint/luminosity recipe.
-            // Retain the project's legacy tint-capable AccentPolicy approximation in dark mode.
-            // This path is intentionally treated as an approximation, not a published Shell token.
             var noBackdrop = DwmsbtNone;
             DwmSetWindowAttribute(window, DwmwaSystemBackdropType, ref noBackdrop, sizeof(int));
             if (frameResult >= 0 && SetAcrylicAccentPolicy(window, enabled: true, gradientColor: DarkAcrylicGradientColor))
@@ -273,8 +259,6 @@ internal static class OsdTheme
                 return;
             }
 
-            // If the tint-capable path is unavailable, keep Acrylic behavior through the
-            // documented transient system backdrop rather than dropping straight to a solid fill.
             var darkFallbackBackdropType = DwmsbtTransientWindow;
             var darkFallbackBackdropResult = DwmSetWindowAttribute(
                 window,
@@ -285,9 +269,6 @@ internal static class OsdTheme
             return;
         }
 
-        // Keep the same legacy tint-capable approximation in light mode for visual continuity.
-        // Fall back to the supported transient system backdrop when the private AccentPolicy path
-        // is unavailable.
         var noLightBackdrop = DwmsbtNone;
         DwmSetWindowAttribute(window, DwmwaSystemBackdropType, ref noLightBackdrop, sizeof(int));
         if (frameResult >= 0 &&

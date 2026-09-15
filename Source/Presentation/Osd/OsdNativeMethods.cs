@@ -85,12 +85,6 @@ internal static class OsdNativeMethods
     internal const int WcaAccentPolicy = 19;
     internal const int AccentDisabled = 0;
     internal const int AccentEnableAcrylicBlurBehind = 4;
-    // Accent-policy colours are AABBGGRR. These are compatibility heuristics for the legacy
-    // undocumented ACCENT_POLICY path; they are NOT public WinUI/Shell material tokens. Exact
-    // Desktop Acrylic is a compositor recipe (tint + luminosity + blur + noise), not one packed
-    // colour, so keep this layer isolated from the verified semantic foreground tokens below.
-    // Tuned to approximate the Windows 11 transient Acrylic appearance while preserving the
-    // intended blur/material strength. Format is AABBGGRR.
     internal const uint DarkAcrylicGradientColor = 0xD22C2F2C;  // RGB #2C2F2C
     internal const uint LightAcrylicGradientColor = 0xDCEDF0EB; // RGB #EBF0ED
 
@@ -129,22 +123,16 @@ internal static class OsdNativeMethods
     internal const uint BiRgb = 0;
     internal const uint DibRgbColors = 0;
 
-    // HKCU\...\Explorer\Accent\AccentPalette is eight 4-byte entries:
-    // Light3, Light2, Light1, Accent, Dark1, Dark2, Dark3, Extra.
+    // HKCU\...\Explorer\Accent\AccentPalette is eight 4-byte entries: Light3, Light2, Light1, Accent, Dark1, Dark2, Dark3, Extra.
     internal const int AccentPaletteLight2 = 1;
     internal const int AccentPaletteDark1 = 4;
 
-    // WinUI's ControlFastAnimationDuration resource is 167 ms. Use it as the actual clock for
-    // both directions rather than as a timeout around an independently-timed DWM transition.
     internal const uint ControlFastAnimationDurationMilliseconds = 167;
     internal const int EntranceTranslationDip = 20;
     internal const uint HideDelayMilliseconds = 2000;
-    // Graceful service/session changes send WM_CLOSE immediately. This low-frequency Win32
-    // watchdog is only a fallback for abrupt service termination or a missed session transition.
+    // Graceful service/session changes send WM_CLOSE immediately.
     internal const uint ServiceWatchIntervalMilliseconds = 5000;
 
-    // Windows 11 ships these glyphs in Segoe Fluent Icons. Keep the font glyph optically
-    // centered inside the 32-DIP leading icon slot used by this compact indicator.
     internal const string BrightnessGlyph = "\uE706";
     internal const string KeyboardGlyph = "\uED39";
     internal const string MicrophoneOffGlyph = "\uEC54";
@@ -159,9 +147,6 @@ internal static class OsdNativeMethods
     internal static int DipToPx(double value, uint dpi)
     {
         // All layout coordinates are non-negative except for deliberate optical text offsets.
-        // Round each logical boundary independently. This is the WinUI-like model we need at
-        // fractional scaling: derive a physical edge from its DIP coordinate, never from a
-        // separately-rounded window size minus a separately-rounded padding.
         var scaled = value * dpi / 96.0;
         return (int)Math.Round(scaled, MidpointRounding.AwayFromZero);
     }
@@ -178,8 +163,7 @@ internal static class OsdNativeMethods
 
     internal static int ScaleHalfDip(int halfDipUnits, uint dpi)
     {
-        // halfDipUnits is expressed in 0.5-DIP units. Keep optical nudges DPI-relative rather
-        // than baking in physical pixels (3 means 1.5 DIP).
+        // halfDipUnits is expressed in 0.5-DIP units.
         return (int)(((long)halfDipUnits * dpi + 96) / 192);
     }
 

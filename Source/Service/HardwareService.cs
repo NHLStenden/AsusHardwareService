@@ -4,13 +4,8 @@ using Microsoft.Extensions.Logging;
 namespace AsusHardwareService.Service;
 
 /// <summary>
-/// Owns only the Windows-service lifecycle and concurrency between startup, hotkeys, and user-session monitoring.
+/// Runs the hardware service.
 /// </summary>
-/// <remarks>
-/// Hardware behavior lives in <see cref="StartupInitializer"/>, <see cref="HotkeyHandler"/>, and
-/// <see cref="SessionMonitor"/>. Keeping this worker thin prevents the service host from becoming the
-/// application itself, while avoiding a separate application assembly for a small Windows-only daemon.
-/// </remarks>
 internal sealed class HardwareService : BackgroundService
 {
     private readonly ILogger<HardwareService> _logger;
@@ -38,8 +33,7 @@ internal sealed class HardwareService : BackgroundService
         _logger.LogInformation("ASUS Hardware Service started in Windows Session 0.");
         await _startup.InitializeAsync(stoppingToken).ConfigureAwait(false);
 
-        // HidSharp performs a blocking report read. Keep it on a worker thread so session monitoring
-        // continues independently of the vendor HID transport.
+        // HidSharp performs a blocking report read.
         var hotkeyTask = Task.Run(
             () => _hotkeyListener.ListenAsync(
                 hotkey => _hotkeys.DispatchAsync(hotkey, stoppingToken),

@@ -9,7 +9,7 @@ using Microsoft.Extensions.Logging;
 
 namespace AsusHardwareService.Service;
 
-/// <summary>Exposes the service-owned hardware settings API to interactive local-session presentation.</summary>
+/// <summary>Exposes the hardware settings API tothe user interface.</summary>
 internal sealed class HardwareSettingsPipeServer : BackgroundService
 {
     private static readonly TimeSpan RequestReadTimeout = TimeSpan.FromSeconds(5);
@@ -17,7 +17,7 @@ internal sealed class HardwareSettingsPipeServer : BackgroundService
     private readonly ILogger<HardwareSettingsPipeServer> _logger;
     private readonly HardwareSettingsCoordinator _settings;
 
-    /// <summary>Initializes the local hardware-settings endpoint.</summary>
+    /// <summary>Initializes a new instance of the <see cref="HardwareSettingsPipeServer"/> class.</summary>
     public HardwareSettingsPipeServer(
         ILogger<HardwareSettingsPipeServer> logger,
         HardwareSettingsCoordinator settings)

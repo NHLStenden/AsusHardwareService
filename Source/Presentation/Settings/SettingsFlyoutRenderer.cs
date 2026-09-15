@@ -24,11 +24,9 @@ internal static class SettingsFlyoutRenderer
     private const string ChevronUpGlyph = "\uE70E"; // ChevronUp
     private const string CheckMarkGlyph = "\uE73E"; // CheckMark
     private const int ColorHighlightText = 14;
-    // Segoe Fluent Icons is optically hinted at 20 DIP; avoid fractional/non-standard glyph sizes.
     private const double FluentIconFontSizeDip = 20.0;
 
-    // The settings fly-out repaints frequently while the pointer moves between mode tiles. Keep
-    // the backdrop and control surfaces in a persistent DIB so DWM only sees complete frames.
+    // Use a persistent DIB so DWM receives complete frames.
     private static IntPtr _backBufferDc;
     private static IntPtr _backBufferBitmap;
     private static IntPtr _backBufferOldBitmap;
@@ -68,7 +66,7 @@ internal static class SettingsFlyoutRenderer
 
             if (!EnsureBackBuffer(paintDc, width, height))
             {
-                // Allocation failure is non-fatal. Preserve the original direct-paint path.
+                // Fall back to direct painting if allocation fails.
                 DrawSurface(window, paintDc, dpi, ref clientRect, model);
                 DrawForeground(window, paintDc, dpi, model);
                 return;
@@ -76,9 +74,7 @@ internal static class SettingsFlyoutRenderer
 
             DrawSurface(window, _backBufferDc, dpi, ref clientRect, model);
             CommitBackBufferPixels();
-            // While an in-window Splendid drop-down is open, its buffered layer is authoritative
-            // for the covered region. Repainting Acrylic foreground text directly afterward would
-            // punch dark text DIBs through the popup and expose partial frames while hovering.
+            // Do not repaint content beneath an open drop-down.
             var paintForeground = model.OpenSplendidPopup is null && IntersectsForeground(paintDc, dpi);
             if (OsdTheme.HighContrast && paintForeground)
             {
@@ -104,10 +100,7 @@ internal static class SettingsFlyoutRenderer
 
             if (!OsdTheme.HighContrast && paintForeground)
             {
-                // DTT_COMPOSITED is intentionally drawn after the atomic surface presentation;
-                // its transparent text DIBs need the real glass-backed window as their target.
-                // Interactive tile invalidations do not intersect these regions, so a hover now
-                // presents as one opaque buffered blit instead of repainting the Acrylic text layer.
+                // Draw composited text after presenting the buffered surface.
                 DrawForeground(window, paintDc, dpi, model);
             }
         }
@@ -223,8 +216,7 @@ internal static class SettingsFlyoutRenderer
 
         if (model.OpenSplendidPopup is { })
         {
-            // The drop-down is an in-window top layer. Render both its surface and content into
-            // the same persistent DIB so hover/selection changes are presented as one frame.
+            // Render the drop-down into the same back buffer.
             DrawSplendidPopupSurface(deviceContext, dpi, model);
             DrawSplendidPopupForeground(window, deviceContext, dpi, model);
         }
@@ -337,8 +329,6 @@ internal static class SettingsFlyoutRenderer
             DtLeft,
             primary);
 
-        // Normal operation is intentionally silent, like Quick Settings. Only exceptional
-        // states use the small secondary line; there is no instructional or success copy.
         if (!string.IsNullOrWhiteSpace(model.StatusText))
         {
             DrawTextOnSurface(
@@ -354,7 +344,7 @@ internal static class SettingsFlyoutRenderer
         }
     }
 
-    /// <summary>Returns whether the current paint clip actually reaches any Acrylic-backed text region.</summary>
+    /// <summary>Determines whether the current paint clip actually reaches any Acrylic-backed text region.</summary>
     private static bool IntersectsForeground(IntPtr paintDc, uint dpi)
     {
         return IsVisible(paintDc, OsdLayout.ToPixels(SettingsFlyoutLayout.TitleRect, dpi)) ||
@@ -532,9 +522,7 @@ internal static class SettingsFlyoutRenderer
             pressed,
             model.IsAvailable);
 
-        // Render the glyph through DTT_COMPOSITED into a temporary alpha surface, then blend that
-        // surface into the persistent fly-out DIB. Ordinary GDI text leaves undefined alpha in a
-        // 32-bpp Acrylic buffer, which is why light-theme icons could disappear in the prior build.
+        // Render the glyph through DTT_COMPOSITED into a temporary alpha surface, then blend that surface into the persistent fly-out DIB.
         DrawControlText(
             window,
             deviceContext,
@@ -1125,8 +1113,6 @@ internal static class SettingsFlyoutRenderer
             return ColorRefToOpaqueArgb(GetSysColor(ColorWindowText));
         }
 
-        // Match WinUI ControlStrongFillColorDefault/Disabled, which are the neutral strong-fill
-        // tokens used for this class of compact slider surface.
         if (!isAvailable)
         {
             return OsdTheme.IsDarkTheme ? 0x3FFFFFFFu : 0x51000000u;
@@ -1142,7 +1128,6 @@ internal static class SettingsFlyoutRenderer
             return OsdTheme.GetFallbackSurfaceArgb();
         }
 
-        // WinUI sliders use a neutral thumb surface with an accent-colored center.
         return OsdTheme.IsDarkTheme ? 0xFF454545u : 0xFFFFFFFFu;
     }
 
@@ -1324,8 +1309,6 @@ internal static class SettingsFlyoutRenderer
                 return OsdTheme.IsDarkTheme ? 0x28FFFFFFu : 0x37000000u;
             }
 
-            // WinUI AccentButton uses AccentFillColorDefault, then the same accent at 90% for
-            // pointer-over and 80% while pressed.
             return pressed
                 ? WithAlpha(accent, 0xCC)
                 : hovered
@@ -1333,9 +1316,6 @@ internal static class SettingsFlyoutRenderer
                     : accent;
         }
 
-        // These are the public WinUI ControlFillColor* tokens used by the standard Button style.
-        // Keeping their alpha intact is important: Quick Settings tiles are material overlays, not
-        // opaque gray/white rectangles flattened over Acrylic.
         if (OsdTheme.IsDarkTheme)
         {
             if (!isAvailable)
@@ -1382,9 +1362,6 @@ internal static class SettingsFlyoutRenderer
             return GetSysColor(ColorHighlightText);
         }
 
-        // TextOnAccentFillColorPrimary is black in dark theme and white in light theme. Use the
-        // higher-contrast choice as a safety net for custom/legacy accent palettes whose registry
-        // shade may not satisfy the usual Windows light/dark accent assumptions.
         var accent = OsdTheme.GetAccentArgb();
         var blackContrast = GetContrastRatio(accent, 0xFF000000u);
         var whiteContrast = GetContrastRatio(accent, 0xFFFFFFFFu);
@@ -1413,8 +1390,6 @@ internal static class SettingsFlyoutRenderer
                 return;
             }
 
-            // AccentControlElevationBorderBrush: the selected tile keeps the subtle Windows 11
-            // elevation edge instead of the bright flat outline used by the previous revision.
             topArgb = 0x14FFFFFFu; // ControlStrokeColorOnAccentDefault
             bottomArgb = OsdTheme.IsDarkTheme ? 0x23000000u : 0x66000000u;
             return;
@@ -1434,7 +1409,6 @@ internal static class SettingsFlyoutRenderer
         }
         else
         {
-            // WinUI flips ControlElevationBorderBrush in light theme.
             topArgb = defaultStroke;
             bottomArgb = 0x29000000u;
         }
@@ -1509,13 +1483,11 @@ internal static class SettingsFlyoutRenderer
             return;
         }
 
-        // Allocation/theme failure fallback. The normal Acrylic path above is alpha-correct; this
-        // direct GDI branch exists only to keep the control usable if a transient resource fails.
+        // Allocation/theme failure fallback.
         var drawingIntoBackBuffer = deviceContext == _backBufferDc && _backBufferSurface is not null;
         if (drawingIntoBackBuffer)
         {
-            // The managed pixels are authoritative until CommitBackBufferPixels. Commit first so
-            // fallback GDI text is not immediately overwritten by the final frame copy.
+            // The managed pixels are authoritative until CommitBackBufferPixels.
             CommitBackBufferPixels();
         }
 

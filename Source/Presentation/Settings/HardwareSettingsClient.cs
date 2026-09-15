@@ -4,13 +4,13 @@ using AsusHardwareService.Settings;
 
 namespace AsusHardwareService.Presentation.Settings;
 
-/// <summary>Interactive-session client for the service-owned hardware settings API.</summary>
+/// <summary>Interactive-session client for the hardware settings API.</summary>
 internal sealed class HardwareSettingsClient
 {
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan OperationTimeout = TimeSpan.FromSeconds(45);
 
-    /// <summary>Reads the current user-adjustable hardware settings from the service.</summary>
+    /// <summary>Reads the current hardware settings from the service.</summary>
     /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns>The service response containing the current settings.</returns>
     public Task<HardwareSettingsResponse> ReadAsync(CancellationToken cancellationToken = default) =>
@@ -51,9 +51,7 @@ internal sealed class HardwareSettingsClient
             PipeOptions.Asynchronous);
         await pipe.ConnectAsync(connectTimeout.Token).ConfigureAwait(false);
 
-        // Applying a hardware setting can legitimately wait for ASUS ACPI or GPU transitions.
-        // Keep the fast connection timeout separate from the operation timeout so a healthy but
-        // temporarily-stopped driver is not misreported as a dead settings service.
+        // Use separate connection and operation timeouts for hardware changes.
         using var operationTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         operationTimeout.CancelAfter(OperationTimeout);
 

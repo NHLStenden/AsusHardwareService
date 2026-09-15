@@ -9,7 +9,7 @@ using Microsoft.Extensions.Logging;
 namespace AsusHardwareService.Service;
 
 /// <summary>
-/// Maps logical hardware hotkeys to application actions and publishes the resulting user-visible state.
+/// Handles ASUS hardware hotkeys.
 /// </summary>
 internal sealed class HotkeyHandler
 {
@@ -159,9 +159,7 @@ internal sealed class HotkeyHandler
         }
         finally
         {
-            // Keep the expected value only while a burst of hotkey transitions is queued. Once
-            // the latest request completes, future presses must start from controller state so an
-            // operating mode selected through the settings UI cannot be shadowed by stale state.
+            // Keep the expected value only while a burst of hotkey transitions is queued.
             lock (_operatingModeStateLock)
             {
                 if (_expectedOperatingMode == requestedMode)

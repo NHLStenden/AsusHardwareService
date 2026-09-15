@@ -204,8 +204,6 @@ internal static class OsdHost
             return true;
         }
 
-        // Keep the resident process aligned with the original UI contract as well: if Explorer/the
-        // interactive Windows shell has gone away, there is no surface on which this OSD belongs.
         if (GetShellWindow() == IntPtr.Zero)
         {
             return true;

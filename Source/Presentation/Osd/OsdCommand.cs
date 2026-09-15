@@ -3,7 +3,7 @@ using AsusHardwareService.Asus.Performance;
 namespace AsusHardwareService.Presentation.Osd;
 
 /// <summary>
-/// Identifies the hardware status that the resident UI should display.
+/// Identifies hardware status types.
 /// </summary>
 internal enum OnScreenDisplayNotificationKind
 {
@@ -29,20 +29,15 @@ internal enum OnScreenDisplayNotificationKind
 }
 
 /// <summary>
-/// Represents one hardware status update sent to the lightweight UI.
+/// Represents a hardware status update.
 /// </summary>
 /// <param name="Kind">The hardware function represented by the update.</param>
 /// <param name="Value">The integer state value for the hardware function.</param>
 internal readonly record struct OnScreenDisplayNotification(OnScreenDisplayNotificationKind Kind, int Value);
 
 /// <summary>
-/// Handles command-line invocations for the lightweight Win32 hardware status UI.
+/// Handles commands for the hardware status UI.
 /// </summary>
-/// <remarks>
-/// The Windows service starts the current executable in this mode inside the active interactive
-/// user session. A short-lived invocation forwards its status to the resident UI instance through
-/// a window message. If no UI instance exists yet, the invocation becomes that resident instance.
-/// </remarks>
 internal static class OsdCommand
 {
     /// <summary>

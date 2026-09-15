@@ -36,10 +36,6 @@ internal sealed class HardwareOptions
     /// <summary>
     /// Gets or sets the legacy brightness-broadcast option from the original configuration contract.
     /// </summary>
-    /// <remarks>
-    /// The original application defines this option but does not consume it. It is retained so existing
-    /// configuration files and future behavior do not silently lose a setting during the refactor.
-    /// </remarks>
     public bool BroadcastBrightnessChanges { get; set; } = true;
 
     /// <summary>Gets or sets the MiniLED local-dimming mode.</summary>

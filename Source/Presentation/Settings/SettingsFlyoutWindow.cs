@@ -80,7 +80,7 @@ internal static class SettingsFlyoutWindow
     private static int _hideOffScreenY;
     private static string? _statusText;
 
-    /// <summary>Creates the fly-out when necessary and activates it in the resident UI process.</summary>
+    /// <summary>Creates the fly-out when necessary and activates it in the UI process.</summary>
     /// <returns><see langword="true"/> when the fly-out was shown.</returns>
     internal static bool Show()
     {
@@ -120,8 +120,7 @@ internal static class SettingsFlyoutWindow
         OsdTheme.RefreshSystemPreferences();
         OsdTheme.ConfigureWindows11Appearance(_windowHandle);
 
-        // A generic Win32 popup transition does not match the taskbar fly-outs. Disable DWM's
-        // default window transition for this HWND and use the short Fluent translation below.
+        // Disable the default DWM transition; this window provides its own animation.
         var transitionsDisabled = 1;
         DwmSetWindowAttribute(
             _windowHandle,
@@ -186,8 +185,7 @@ internal static class SettingsFlyoutWindow
                     InvalidateFocusVisual(window, previouslyFocusedControl);
                 }
 
-                // The open ComboBox-style popup is the top-most interaction layer. Do not let
-                // pointer input fall through to the hardware controls it visually covers.
+                // Do not route pointer input through an open popup.
                 if (_openSplendidPopup is { } openSplendidSelector)
                 {
                     if (CanEditSplendidSelector(openSplendidSelector) && TryGetSplendidPopupIndexAtPoint(
@@ -1539,7 +1537,7 @@ internal static class SettingsFlyoutWindow
         }
     }
 
-    /// <summary>Invalidates only the stateful surface of one operating-mode action tile.</summary>
+    /// <summary>Invalidates only the stateful surface of an operating-mode action tile.</summary>
     private static void InvalidateOperatingModeTile(IntPtr window, OperatingModePreset? operatingMode)
     {
         if (operatingMode is not { } mode)
@@ -1553,7 +1551,7 @@ internal static class SettingsFlyoutWindow
             new DipRect(rect.Left - 1.0, rect.Top - 1.0, rect.Right + 1.0, rect.Bottom + 1.0));
     }
 
-    /// <summary>Invalidates only the stateful surface of one laptop-screen action tile.</summary>
+    /// <summary>Invalidates only the stateful surface of a laptop-screen action tile.</summary>
     private static void InvalidateLaptopDisplayModeTile(IntPtr window, LaptopDisplayMode? laptopDisplayMode)
     {
         if (laptopDisplayMode is not { } mode)
@@ -1567,7 +1565,7 @@ internal static class SettingsFlyoutWindow
             new DipRect(rect.Left - 1.0, rect.Top - 1.0, rect.Right + 1.0, rect.Bottom + 1.0));
     }
 
-    /// <summary>Invalidates only the stateful surface of one MiniLED action tile.</summary>
+    /// <summary>Invalidates only the stateful surface of a MiniLED action tile.</summary>
     private static void InvalidateMiniLedModeTile(IntPtr window, MiniLedMode? miniLedMode)
     {
         if (miniLedMode is not { } mode)
@@ -1687,8 +1685,7 @@ internal static class SettingsFlyoutWindow
             ReleaseCapture();
         }
 
-        // The HWND is intentionally kept resident after a normal dismissal. Do not carry a stale
-        // pointer-over state into the next keyboard-triggered presentation.
+        // Clear hover state when reusing the window.
         _hoveredOperatingMode = null;
         _hoveredLaptopDisplayMode = null;
         _hoveredMiniLedMode = null;
@@ -1890,8 +1887,7 @@ internal static class SettingsFlyoutWindow
 
         if (destroy)
         {
-            // Make the last translated position a real presented frame before destroying the HWND.
-            // Otherwise DWM can coalesce the final move with destruction and truncate the exit.
+            // Present the final animation frame before destroying the window.
             DwmFlush();
             PostMessage(window, WmClose, UIntPtr.Zero, IntPtr.Zero);
             return;
@@ -1903,9 +1899,7 @@ internal static class SettingsFlyoutWindow
             return;
         }
 
-        // A settings update/read may still be completing after light-dismiss. Finish the visual
-        // dismissal now, but keep the HWND alive so its completion message cannot race a reused
-        // window handle. CompleteRead/CompleteUpdate will close it when the operation finishes.
+        // Keep the window alive until any pending settings operation completes.
         DwmFlush();
         ShowWindow(window, SwHide);
         SetFlyoutPosition(window, _finalY, show: false);
@@ -1942,8 +1936,7 @@ internal static class SettingsFlyoutWindow
             return 1.0;
         }
 
-        // Fluent direct-entrance/exit curve cubic-bezier(0, 0, 0, 1). With both x control
-        // points at zero, x=t^3, so the parameter can be recovered with a cube root.
+        // For cubic-bezier(0, 0, 0, 1), x = t^3.
         var parameter = Math.Cbrt(progress);
         return (3.0 * parameter * parameter) - (2.0 * progress);
     }
@@ -1960,8 +1953,7 @@ internal static class SettingsFlyoutWindow
             return 1.0;
         }
 
-        // Fluent Gentle Exit uses cubic-bezier(1, 0, 1, 1). It is the motion-only exit
-        // variant, avoiding a synthetic whole-window alpha fade that would break Acrylic.
+        // Use the motion-only exit curve to preserve the backdrop.
         var parameter = 1.0 - Math.Cbrt(1.0 - progress);
         return (3.0 * parameter * parameter) -
             (2.0 * parameter * parameter * parameter);
@@ -2036,13 +2028,10 @@ internal static class SettingsFlyoutWindow
         var height = DipToPx(SettingsFlyoutLayout.HeightDip, dpi);
         var margin = DipToPx(SettingsFlyoutLayout.EdgeMarginDip, dpi);
 
-        // Unlike the configurable hardware OSD, this is taskbar-adjacent UI. Anchor it to the
-        // same lower-right work-area edge as Windows Quick Settings instead of the OSD position.
         _finalX = monitorInfo.rcWork.Right - width - margin;
         _finalY = monitorInfo.rcWork.Bottom - height - margin;
 
-        // Match OsdPresenter's taskbar-directed exit. Continue through the physical monitor edge
-        // with enough extra clearance for the rounded shadow/backdrop before hiding the HWND.
+        // Match OsdPresenter's taskbar-directed exit.
         var offScreenVisualClearance = Math.Max(1, height / 2);
         _hideOffScreenY = monitorInfo.rcMonitor.Bottom + offScreenVisualClearance;
 

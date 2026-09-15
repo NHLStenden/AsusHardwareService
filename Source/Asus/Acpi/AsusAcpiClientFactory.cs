@@ -7,7 +7,7 @@ internal sealed class AsusAcpiClientFactory
 {
     private readonly ILoggerFactory _loggerFactory;
 
-    /// <summary>Initializes a new factory.</summary>
+    /// <summary>Initializes a new instance of the <see cref="AsusAcpiClientFactory"/> class.</summary>
     public AsusAcpiClientFactory(ILoggerFactory loggerFactory)
     {
         _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));

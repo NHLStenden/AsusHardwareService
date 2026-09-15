@@ -51,9 +51,7 @@ internal static class OsdWindow
                 return 0;
             }
 
-            // The command is already running inside the interactive user session. A logged-on user
-            // can exist briefly before Explorer has created the shell window; in that case do not
-            // leave a resident UI process behind.
+            // The command is already running in the user session.
             if (GetShellWindow() == IntPtr.Zero)
             {
                 return 0;

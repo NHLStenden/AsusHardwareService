@@ -6,35 +6,31 @@ using AsusHardwareService.Asus.Splendid;
 
 namespace AsusHardwareService.Settings;
 
-/// <summary>Identifies an operation in the service-owned hardware-settings protocol.</summary>
+/// <summary>Identifies an operation in the hardware-settings protocol.</summary>
 internal enum HardwareSettingsOperation
 {
-    /// <summary>Reads the current user-adjustable hardware settings.</summary>
+    /// <summary>Reads the current hardware settings.</summary>
     Read = 1,
 
-    /// <summary>Applies a partial update to the user-adjustable hardware settings.</summary>
+    /// <summary>Applies a partial update to the hardware settings.</summary>
     Update = 2,
 }
 
 /// <summary>Describes an integer setting together with the range the UI may expose.</summary>
-/// <param name="Value">The service-owned current value.</param>
+/// <param name="Value">The current value.</param>
 /// <param name="Minimum">The smallest accepted value.</param>
 /// <param name="Maximum">The largest accepted value.</param>
 /// <param name="Step">The smallest supported increment.</param>
 internal sealed record IntegerSettingState(int Value, int Minimum, int Maximum, int Step);
 
-/// <summary>Snapshot of user-adjustable hardware settings.</summary>
+/// <summary>Represents hardware settings.</summary>
 /// <param name="BatteryChargeLimit">The current battery charge-limit state.</param>
-/// <param name="OperatingMode">The current service-observed operating-mode preset, when representable.</param>
-/// <param name="LaptopDisplayMode">The configured laptop-panel refresh-rate and overdrive preset.</param>
-/// <param name="MiniLedMode">The configured MiniLED local-dimming mode.</param>
-/// <param name="SplendidVisualMode">The configured ASUS Splendid visual preset.</param>
-/// <param name="SplendidGamutMode">The configured ASUS Splendid color gamut.</param>
-/// <param name="SplendidColorTemperature">The configured ASUS Splendid color temperature.</param>
-/// <remarks>
-/// Add future user-adjustable properties here rather than creating feature-specific presentation
-/// channels. The service remains authoritative for validation and hardware application.
-/// </remarks>
+/// <param name="OperatingMode">The current operating-mode preset, when representable.</param>
+/// <param name="LaptopDisplayMode">The laptop-panel refresh-rate and overdrive preset.</param>
+/// <param name="MiniLedMode">The MiniLED local-dimming mode.</param>
+/// <param name="SplendidVisualMode">The ASUS Splendid visual preset.</param>
+/// <param name="SplendidGamutMode">The ASUS Splendid color gamut.</param>
+/// <param name="SplendidColorTemperature">The ASUS Splendid color temperature.</param>
 internal sealed record HardwareSettingsSnapshot(
     IntegerSettingState BatteryChargeLimit,
     OperatingModePreset? OperatingMode,
@@ -44,7 +40,7 @@ internal sealed record HardwareSettingsSnapshot(
     SplendidGamutMode SplendidGamutMode,
     SplendidColorTemperature SplendidColorTemperature);
 
-/// <summary>Partial hardware-settings update. Null properties are left unchanged.</summary>
+/// <summary>Represents a partial hardware settings update. Null properties are unchanged.</summary>
 /// <param name="BatteryChargeLimitPercent">A replacement battery charge ceiling, or <see langword="null"/>.</param>
 /// <param name="OperatingMode">A replacement operating-mode preset, or <see langword="null"/>.</param>
 /// <param name="LaptopDisplayMode">A replacement laptop-panel preset, or <see langword="null"/>.</param>
@@ -52,9 +48,6 @@ internal sealed record HardwareSettingsSnapshot(
 /// <param name="SplendidVisualMode">A replacement ASUS Splendid visual preset, or <see langword="null"/>.</param>
 /// <param name="SplendidGamutMode">A replacement ASUS Splendid color gamut, or <see langword="null"/>.</param>
 /// <param name="SplendidColorTemperature">A replacement ASUS Splendid color temperature, or <see langword="null"/>.</param>
-/// <remarks>
-/// This patch shape deliberately leaves room for additional independently-updatable properties.
-/// </remarks>
 internal sealed record HardwareSettingsPatch(
     int? BatteryChargeLimitPercent = null,
     OperatingModePreset? OperatingMode = null,
@@ -64,7 +57,7 @@ internal sealed record HardwareSettingsPatch(
     SplendidGamutMode? SplendidGamutMode = null,
     SplendidColorTemperature? SplendidColorTemperature = null)
 {
-    /// <summary>Gets whether the patch contains no setting changes.</summary>
+    /// <summary>Gets a value indicating whether the patch contains no setting changes.</summary>
     internal bool IsEmpty =>
         !BatteryChargeLimitPercent.HasValue &&
         !OperatingMode.HasValue &&
@@ -75,8 +68,8 @@ internal sealed record HardwareSettingsPatch(
         !SplendidColorTemperature.HasValue;
 }
 
-/// <summary>One request sent from the interactive fly-out to the Windows service.</summary>
-/// <param name="ProtocolVersion">The wire-contract version used by the sender.</param>
+/// <summary>Represents a request sent from the settings flyout to the Windows service.</summary>
+/// <param name="ProtocolVersion">The protocol version used by the sender.</param>
 /// <param name="Operation">The requested settings operation.</param>
 /// <param name="Changes">The partial update for an update operation.</param>
 internal sealed record HardwareSettingsRequest(
@@ -84,10 +77,10 @@ internal sealed record HardwareSettingsRequest(
     HardwareSettingsOperation Operation,
     HardwareSettingsPatch? Changes = null);
 
-/// <summary>One response returned by the Windows service to the interactive fly-out.</summary>
-/// <param name="ProtocolVersion">The wire-contract version used by the service.</param>
+/// <summary>Represents a response returned by the Windows service to the settings flyout.</summary>
+/// <param name="ProtocolVersion">The protocol version used by the service.</param>
 /// <param name="Success">Whether the requested operation completed successfully.</param>
-/// <param name="Settings">The authoritative service-owned settings after the operation.</param>
+/// <param name="Settings">The settings after the operation.</param>
 /// <param name="Error">A user-presentable failure summary, when available.</param>
 internal sealed record HardwareSettingsResponse(
     int ProtocolVersion,
@@ -95,13 +88,13 @@ internal sealed record HardwareSettingsResponse(
     HardwareSettingsSnapshot Settings,
     string? Error = null);
 
-/// <summary>Shared wire-level settings for the local hardware-settings channel.</summary>
+/// <summary>Shared protocol settings for the hardware settings pipe.</summary>
 internal static class HardwareSettingsProtocol
 {
     /// <summary>Current protocol version.</summary>
     internal const int Version = 6;
 
-    /// <summary>Local named-pipe endpoint used by interactive presentation processes.</summary>
+    /// <summary>Local named-pipe endpoint used by user interface processes.</summary>
     internal const string PipeName = "AsusHardwareService.HardwareSettings.v6";
 
     /// <summary>Maximum accepted request or response length in UTF-16 characters.</summary>

@@ -47,9 +47,6 @@ internal enum SplendidProfileSelector
 /// <summary>DPI-independent geometry for the interactive Windows 11-style settings fly-out.</summary>
 internal static class SettingsFlyoutLayout
 {
-    // Keep the Shell-like 360-DIP width. The operating-mode selector follows the Windows 11
-    // Quick Settings tile rhythm, so the fly-out grows vertically rather than compressing labels
-    // into command-button rectangles.
     internal const double WidthDip = 360.0;
     internal const double HeightDip = 604.0;
     internal const double EdgeMarginDip = 12.0;
@@ -62,8 +59,6 @@ internal static class SettingsFlyoutLayout
 
     internal static readonly DipRect OperatingModeTitleRect = new(20.0, 84.0, 340.0, 108.0);
 
-    // Windows 11 Quick Settings separates the action surface from its label. Three equal tiles fit
-    // the existing 320-DIP content width with a calm 10-DIP gutter between actions.
     internal static readonly DipRect EcoButtonRect = new(20.0, 112.0, 120.0, 160.0);
     internal static readonly DipRect BalancedButtonRect = new(130.0, 112.0, 230.0, 160.0);
     internal static readonly DipRect TurboButtonRect = new(240.0, 112.0, 340.0, 160.0);
@@ -87,9 +82,6 @@ internal static class SettingsFlyoutLayout
     internal static readonly DipRect MiniLedMultiZoneLabelRect = new(130.0, 384.0, 230.0, 408.0);
     internal static readonly DipRect MiniLedStrongLabelRect = new(240.0, 384.0, 340.0, 408.0);
 
-    // ASUS Splendid is one composed display-color profile. Windows 11 settings commonly present
-    // related choices as compact setting rows, so keep visual mode, gamut, and white balance
-    // together rather than making one option look like an isolated top-level feature.
     internal static readonly DipRect SplendidTitleRect = new(20.0, 414.0, 340.0, 438.0);
     internal static readonly DipRect SplendidVisualSelectorRect = new(20.0, 442.0, 340.0, 482.0);
     internal static readonly DipRect SplendidGamutSelectorRect = new(20.0, 486.0, 340.0, 526.0);
@@ -108,7 +100,7 @@ internal static class SettingsFlyoutLayout
     internal const double SplendidPopupItemHeightDip = 32.0;
     internal static readonly DipRect StatusRect = new(20.0, 576.0, 340.0, 598.0);
 
-    /// <summary>Returns a touch-friendly hit target around the visible slider track.</summary>
+    /// <summary>Gets a touch-friendly hit target around the visible slider track.</summary>
     internal static PixelRect GetSliderHitRect(uint dpi)
     {
         var track = OsdLayout.ToPixels(TrackRect, dpi);
@@ -121,7 +113,7 @@ internal static class SettingsFlyoutLayout
             track.Bottom + verticalPadding);
     }
 
-    /// <summary>Returns the operating-mode preset under the supplied client point, when present.</summary>
+    /// <summary>Gets the operating-mode preset under the supplied client point, if available.</summary>
     internal static bool TryGetOperatingModeAtPoint(
         uint dpi,
         int x,
@@ -150,7 +142,7 @@ internal static class SettingsFlyoutLayout
         return false;
     }
 
-    /// <summary>Returns the laptop-screen preset under the supplied client point, when present.</summary>
+    /// <summary>Gets the laptop-screen preset under the supplied client point, if available.</summary>
     internal static bool TryGetLaptopDisplayModeAtPoint(
         uint dpi,
         int x,
@@ -179,7 +171,7 @@ internal static class SettingsFlyoutLayout
         return false;
     }
 
-    /// <summary>Returns the Quick Settings-style action-tile geometry for one operating-mode option.</summary>
+    /// <summary>Gets the action-tile geometry for an operating-mode option.</summary>
     internal static DipRect GetOperatingModeRect(OperatingModePreset operatingMode) => operatingMode switch
     {
         OperatingModePreset.Eco => EcoButtonRect,
@@ -188,7 +180,7 @@ internal static class SettingsFlyoutLayout
         _ => throw new ArgumentOutOfRangeException(nameof(operatingMode), operatingMode, "Unsupported operating mode."),
     };
 
-    /// <summary>Returns the label geometry beneath one operating-mode action tile.</summary>
+    /// <summary>Gets the label geometry beneath an operating-mode action tile.</summary>
     internal static DipRect GetOperatingModeLabelRect(OperatingModePreset operatingMode) => operatingMode switch
     {
         OperatingModePreset.Eco => EcoLabelRect,
@@ -197,7 +189,7 @@ internal static class SettingsFlyoutLayout
         _ => throw new ArgumentOutOfRangeException(nameof(operatingMode), operatingMode, "Unsupported operating mode."),
     };
 
-    /// <summary>Returns the combined tile-and-label pointer target for one operating-mode action.</summary>
+    /// <summary>Gets the combined tile-and-label pointer target for an operating-mode action.</summary>
     internal static DipRect GetOperatingModeHitRect(OperatingModePreset operatingMode)
     {
         var tile = GetOperatingModeRect(operatingMode);
@@ -205,7 +197,7 @@ internal static class SettingsFlyoutLayout
         return new DipRect(tile.Left, tile.Top, tile.Right, label.Bottom);
     }
 
-    /// <summary>Returns the Quick Settings-style action-tile geometry for one laptop-screen option.</summary>
+    /// <summary>Gets the action-tile geometry for a laptop-screen option.</summary>
     internal static DipRect GetLaptopDisplayModeRect(LaptopDisplayMode laptopDisplayMode) => laptopDisplayMode switch
     {
         LaptopDisplayMode.Auto => DisplayAutoButtonRect,
@@ -217,7 +209,7 @@ internal static class SettingsFlyoutLayout
             "Unsupported laptop display mode."),
     };
 
-    /// <summary>Returns the label geometry beneath one laptop-screen action tile.</summary>
+    /// <summary>Gets the label geometry beneath a laptop-screen action tile.</summary>
     internal static DipRect GetLaptopDisplayModeLabelRect(LaptopDisplayMode laptopDisplayMode) => laptopDisplayMode switch
     {
         LaptopDisplayMode.Auto => DisplayAutoLabelRect,
@@ -229,7 +221,7 @@ internal static class SettingsFlyoutLayout
             "Unsupported laptop display mode."),
     };
 
-    /// <summary>Returns the combined tile-and-label pointer target for one laptop-screen action.</summary>
+    /// <summary>Gets the combined tile-and-label pointer target for a laptop-screen action.</summary>
     internal static DipRect GetLaptopDisplayModeHitRect(LaptopDisplayMode laptopDisplayMode)
     {
         var tile = GetLaptopDisplayModeRect(laptopDisplayMode);
@@ -237,7 +229,7 @@ internal static class SettingsFlyoutLayout
         return new DipRect(tile.Left, tile.Top, tile.Right, label.Bottom);
     }
 
-    /// <summary>Returns the MiniLED local-dimming mode under the supplied client point, when present.</summary>
+    /// <summary>Gets the MiniLED local-dimming mode under the supplied client point, if available.</summary>
     internal static bool TryGetMiniLedModeAtPoint(uint dpi, int x, int y, out MiniLedMode miniLedMode)
     {
         if (Contains(OsdLayout.ToPixels(GetMiniLedModeHitRect(MiniLedMode.OneZone), dpi), x, y))
@@ -262,7 +254,7 @@ internal static class SettingsFlyoutLayout
         return false;
     }
 
-    /// <summary>Returns the Quick Settings-style action-tile geometry for one MiniLED option.</summary>
+    /// <summary>Gets the action-tile geometry for a MiniLED option.</summary>
     internal static DipRect GetMiniLedModeRect(MiniLedMode miniLedMode) => miniLedMode switch
     {
         MiniLedMode.OneZone => MiniLedOneZoneButtonRect,
@@ -271,7 +263,7 @@ internal static class SettingsFlyoutLayout
         _ => throw new ArgumentOutOfRangeException(nameof(miniLedMode), miniLedMode, "Unsupported MiniLED mode."),
     };
 
-    /// <summary>Returns the label geometry beneath one MiniLED action tile.</summary>
+    /// <summary>Gets the label geometry beneath a MiniLED action tile.</summary>
     internal static DipRect GetMiniLedModeLabelRect(MiniLedMode miniLedMode) => miniLedMode switch
     {
         MiniLedMode.OneZone => MiniLedOneZoneLabelRect,
@@ -280,7 +272,7 @@ internal static class SettingsFlyoutLayout
         _ => throw new ArgumentOutOfRangeException(nameof(miniLedMode), miniLedMode, "Unsupported MiniLED mode."),
     };
 
-    /// <summary>Returns the combined tile-and-label pointer target for one MiniLED action.</summary>
+    /// <summary>Gets the combined tile-and-label pointer target for a MiniLED action.</summary>
     internal static DipRect GetMiniLedModeHitRect(MiniLedMode miniLedMode)
     {
         var tile = GetMiniLedModeRect(miniLedMode);
@@ -288,7 +280,7 @@ internal static class SettingsFlyoutLayout
         return new DipRect(tile.Left, tile.Top, tile.Right, label.Bottom);
     }
 
-    /// <summary>Returns the setting-row geometry for one ASUS Splendid profile selector.</summary>
+    /// <summary>Gets the setting-row geometry for an ASUS Splendid profile selector.</summary>
     internal static DipRect GetSplendidSelectorRect(SplendidProfileSelector selector) => selector switch
     {
         SplendidProfileSelector.VisualMode => SplendidVisualSelectorRect,
@@ -297,7 +289,7 @@ internal static class SettingsFlyoutLayout
         _ => throw new ArgumentOutOfRangeException(nameof(selector), selector, "Unsupported Splendid selector."),
     };
 
-    /// <summary>Returns the value-text geometry for one ASUS Splendid profile selector.</summary>
+    /// <summary>Gets the value-text geometry for an ASUS Splendid profile selector.</summary>
     internal static DipRect GetSplendidValueRect(SplendidProfileSelector selector) => selector switch
     {
         SplendidProfileSelector.VisualMode => SplendidVisualValueRect,
@@ -306,7 +298,7 @@ internal static class SettingsFlyoutLayout
         _ => throw new ArgumentOutOfRangeException(nameof(selector), selector, "Unsupported Splendid selector."),
     };
 
-    /// <summary>Returns the chevron geometry for one ASUS Splendid profile selector.</summary>
+    /// <summary>Gets the chevron geometry for an ASUS Splendid profile selector.</summary>
     internal static DipRect GetSplendidChevronRect(SplendidProfileSelector selector) => selector switch
     {
         SplendidProfileSelector.VisualMode => SplendidVisualChevronRect,
@@ -315,7 +307,7 @@ internal static class SettingsFlyoutLayout
         _ => throw new ArgumentOutOfRangeException(nameof(selector), selector, "Unsupported Splendid selector."),
     };
 
-    /// <summary>Returns the ASUS Splendid selector under the supplied client point, when present.</summary>
+    /// <summary>Gets the ASUS Splendid selector under the supplied client point, if available.</summary>
     internal static bool TryGetSplendidSelectorAtPoint(
         uint dpi,
         int x,
@@ -335,7 +327,7 @@ internal static class SettingsFlyoutLayout
         return false;
     }
 
-    /// <summary>Returns the popup geometry for one ASUS Splendid profile selector.</summary>
+    /// <summary>Gets the popup geometry for an ASUS Splendid profile selector.</summary>
     internal static DipRect GetSplendidPopupRect(SplendidProfileSelector selector)
     {
         var itemCount = GetSplendidPopupItemCount(selector);
@@ -347,7 +339,7 @@ internal static class SettingsFlyoutLayout
             SplendidPopupAreaRect.Bottom);
     }
 
-    /// <summary>Returns the number of choices displayed by one ASUS Splendid selector.</summary>
+    /// <summary>Gets the number of choices displayed by an ASUS Splendid selector.</summary>
     internal static int GetSplendidPopupItemCount(SplendidProfileSelector selector) => selector switch
     {
         SplendidProfileSelector.VisualMode => 10,
@@ -356,7 +348,7 @@ internal static class SettingsFlyoutLayout
         _ => throw new ArgumentOutOfRangeException(nameof(selector), selector, "Unsupported Splendid selector."),
     };
 
-    /// <summary>Returns the popup-row geometry for one ASUS Splendid choice.</summary>
+    /// <summary>Gets the popup-row geometry for an ASUS Splendid choice.</summary>
     internal static DipRect GetSplendidPopupItemRect(SplendidProfileSelector selector, int index)
     {
         var popup = GetSplendidPopupRect(selector);
@@ -368,7 +360,7 @@ internal static class SettingsFlyoutLayout
             top + SplendidPopupItemHeightDip);
     }
 
-    /// <summary>Returns the zero-based popup row under the supplied client point.</summary>
+    /// <summary>Gets the zero-based popup row under the supplied client point.</summary>
     internal static bool TryGetSplendidPopupIndexAtPoint(
         uint dpi,
         SplendidProfileSelector selector,
@@ -393,7 +385,7 @@ internal static class SettingsFlyoutLayout
         x >= rect.Left && x <= rect.Right && y >= rect.Top && y <= rect.Bottom;
 }
 
-/// <summary>Immutable paint state for one settings-fly-out frame.</summary>
+/// <summary>Immutable paint state for a settings flyout frame.</summary>
 internal readonly record struct SettingsFlyoutViewModel(
     int BatteryChargeLimit,
     int BatteryChargeLimitMinimum,

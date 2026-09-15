@@ -8,8 +8,6 @@ namespace AsusHardwareService.Presentation.Osd;
 /// </summary>
 internal static class OsdRenderer
 {
-    // Use the Windows 11 optical size for Segoe Fluent Icons across per-monitor DPI scales.
-    // Body/value text remains 14 DIP.
     private const double IconFontSizeDip = 15.0;
 
     // Persistent back buffer: the compositor only sees complete frames.
@@ -53,10 +51,7 @@ internal static class OsdRenderer
                 return;
             }
 
-            // Draw the *entire* client into memory first. This is important for the extended
-            // DWM/Acrylic frame: FillStatusBackground deliberately writes black before the
-            // foreground. Direct painting lets the compositor occasionally sample that temporary
-            // state during rapid key repeats, which is perceived as a blinking progress bar.
+            // Draw the *entire* client into memory first.
             DrawStatus(window, _backBufferDc);
 
             // Present the finished surface atomically from GDI's point of view.
@@ -72,8 +67,6 @@ internal static class OsdRenderer
                 SrcCopy);
 
             // Draw all non-high-contrast glyphs/text through the same DTT_COMPOSITED path.
-            // DTT_COMPOSITED is the documented UxTheme mechanism for antialiased alpha text on
-            // glass and avoids dark/light rasterization differences in the previous code.
             if (!OsdTheme.HighContrast)
             {
                 DrawForegroundComposited(window, paintDc);
@@ -245,8 +238,6 @@ internal static class OsdRenderer
 
     private static void FillStatusBackground(IntPtr deviceContext, ref Rect clientRect)
     {
-        // A black GDI fill has zeroed pixel data on an extended DWM frame, exposing the Desktop
-        // Acrylic backdrop instead of covering it with the opaque fallback colour.
         if (OsdTheme.SystemBackdropEnabled)
         {
             var transparentBrush = CreateSolidBrush(Rgb(0, 0, 0));
@@ -258,7 +249,6 @@ internal static class OsdRenderer
             return;
         }
 
-        // WinUI flyouts use these colours as the solid fallback when Acrylic cannot be shown.
         var backgroundColor = OsdTheme.HighContrast
             ? GetSysColor(ColorWindow)
             : OsdTheme.IsDarkTheme
@@ -437,8 +427,7 @@ internal static class OsdRenderer
         uint color,
         DipRect rectDip)
     {
-        // Normal themes use one common DTT_COMPOSITED foreground path after the back buffer is
-        // presented. High contrast deliberately remains ordinary GDI on its opaque system surface.
+        // Normal themes use one common DTT_COMPOSITED foreground path after the back buffer is presented.
         if (!OsdTheme.HighContrast)
         {
             return;
@@ -686,9 +675,7 @@ internal static class OsdRenderer
 
         try
         {
-            // CreateDIBSection memory isn't guaranteed to be initialized. Acrylic uses fully
-            // transparent black; the accessibility/transparency-off fallback uses the opaque
-            // WinUI solid fallback so SRCCOPY does not punch a transparent rectangle around text.
+            // CreateDIBSection memory isn't guaranteed to be initialized.
             var pixelCount = checked(width * height);
             var initialArgb = OsdTheme.SystemBackdropEnabled
                 ? 0u
@@ -800,17 +787,14 @@ internal static class OsdRenderer
             return;
         }
 
-        // The persistent top-down DIB is the important path. Draw the capsule ourselves so the
-        // WinUI semantic brush alpha survives all the way to DWM instead of being flattened by
-        // COLORREF/GDI. The old opaque track could never reproduce ControlStrongStrokeColorDefault.
+        // The persistent top-down DIB is the important path.
         if (deviceContext == _backBufferDc && _backBufferBits != IntPtr.Zero)
         {
             DrawArgbCapsuleIntoBackBuffer(left, top, right, bottom, argb);
             return;
         }
 
-        // Allocation-failure/WM_PRINTCLIENT fallback. GDI+ understands ARGB; if it is unavailable,
-        // flatten the semantic color over the solid fallback surface rather than discarding alpha.
+        // Allocation-failure/WM_PRINTCLIENT fallback.
         if (!EnsureGdiPlus())
         {
             DrawFilledRoundRect(

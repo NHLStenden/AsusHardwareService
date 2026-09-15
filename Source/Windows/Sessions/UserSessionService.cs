@@ -2,12 +2,12 @@ using System.Runtime.InteropServices;
 
 namespace AsusHardwareService.Windows.Sessions;
 
-/// <summary>Discovers the active logged-on console session through Windows Terminal Services APIs.</summary>
+/// <summary>Discovers the active logged-on console session using Windows Terminal Services.</summary>
 internal sealed class UserSessionService
 {
     private const uint InvalidSessionId = 0xFFFFFFFF;
 
-    /// <summary>Returns the active console user session when it is logged on and connected.</summary>
+    /// <summary>Gets the active console user session when it is logged on and connected.</summary>
     public InteractiveSession? GetActiveSession()
     {
         var sessionId = WTSGetActiveConsoleSessionId();

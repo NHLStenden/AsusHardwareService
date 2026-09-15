@@ -42,8 +42,7 @@ builder.Services
     .AddOptions<HardwareOptions>()
     .Bind(builder.Configuration.GetSection(HardwareOptions.SectionName));
 
-// Concrete components are the default. Interfaces are reserved for presentation boundaries where
-// service orchestration benefits from depending on behavior rather than a specific Win32 implementation.
+// Use interfaces at presentation boundaries.
 builder.Services.AddSingleton<AsusAcpiClientFactory>();
 builder.Services.AddSingleton<AsusHotkeyListener>();
 builder.Services.AddSingleton<AsusKeyboardBacklightWriter>();

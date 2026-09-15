@@ -11,26 +11,20 @@ namespace AsusHardwareService.Presentation.Osd;
 /// </summary>
 internal static class OsdLayout
 {
-    // Shared shell-style metrics expressed in DIPs so every template scales consistently across
-    // per-monitor DPI settings while retaining its content-driven width.
     internal const double CompactSurfaceHeightDip = 45.0;
     internal const double EdgeMarginDip = 15.0;
 
-    // The half-DIP horizontal offset provides optical alignment for the standard Fluent glyph slot
-    // without changing its 32-DIP width or vertical centre.
     internal static readonly DipRect StandardIconRect = new(7.5, 2.0, 39.5, 45.0);
 
     // Brightness level geometry in DIPs.
     internal static readonly DipRect BrightnessTrackRect = new(44.5, 20.0, 155.0, 24.0);
 
-    // Shared text-family inset. This is not claimed as a private Shell XAML constant; it is a
-    // stable layout primitive for custom icon+text indicators that preserves the existing design.
+    // Shared text-family inset.
     internal const double TextLeftDip = 48.0;
     internal const double TextRightInsetDip = 16.0;
     internal const double TextTopDip = 2.0;
 
-    // Keyboard backlight level geometry in DIPs. The level track is 110 DIPs wide and is
-    // expressed with absolute edges to keep scaling and rounding deterministic.
+    // Keyboard backlight level geometry in DIPs.
     internal static readonly DipRect KeyboardTrackRect = new(42.0, 20.0, 152.0, 24.0);
     internal static readonly DipRect KeyboardValueRect = new(152.0, -2.0, 192.0, 44.0);
 

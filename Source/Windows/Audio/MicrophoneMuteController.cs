@@ -9,7 +9,7 @@ internal sealed class MicrophoneMuteController
     private static readonly Role[] CaptureRoles = [Role.Communications, Role.Console, Role.Multimedia];
     private readonly ILogger<MicrophoneMuteController> _logger;
 
-    /// <summary>Initializes the Windows microphone adapter.</summary>
+    /// <summary>Initializes a new instance of the <see cref="MicrophoneMuteController"/> class.</summary>
     public MicrophoneMuteController(ILogger<MicrophoneMuteController> logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));

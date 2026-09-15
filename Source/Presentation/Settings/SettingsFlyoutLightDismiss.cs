@@ -4,8 +4,7 @@ using static AsusHardwareService.Presentation.Osd.OsdNativeMethods;
 namespace AsusHardwareService.Presentation.Settings;
 
 /// <summary>
-/// Provides Shell-like light-dismiss behavior for the settings fly-out without stealing the
-/// mouse click from the window underneath it.
+/// Provides light-dismiss behavior for the settings flyout.
 /// </summary>
 internal static class SettingsFlyoutLightDismiss
 {

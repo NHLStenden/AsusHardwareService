@@ -2,13 +2,8 @@ using AsusHardwareService.Windows.Power;
 
 namespace AsusHardwareService.Windows.Display;
 /// <summary>
-/// Handles display-related command-line invocations that must run inside the interactive user session.
+/// Handles display-related command-line invocations that must run in the user session.
 /// </summary>
-/// <remarks>
-/// The Windows service starts the current executable with this command mode when it needs to change
-/// refresh rate. Keeping the logic inside the same executable avoids a separate helper binary while
-/// still respecting the Windows session boundary.
-/// </remarks>
 internal static class DisplayCommand
 {
     /// <summary>

@@ -19,7 +19,7 @@ internal sealed class LaptopDisplayController
     private readonly ILogger<LaptopDisplayController> _logger;
     private readonly IOptionsMonitor<HardwareOptions> _options;
 
-    /// <summary>Initializes the ASUS laptop-display adapter.</summary>
+    /// <summary>Initializes a new instance of the <see cref="LaptopDisplayController"/> class.</summary>
     public LaptopDisplayController(
         AsusAcpiClientFactory acpiFactory,
         SessionProcessLauncher processLauncher,
@@ -45,16 +45,16 @@ internal sealed class LaptopDisplayController
         ApplyMiniLedMode(options.MiniLedMode);
     }
 
-    /// <summary>Starts the configured refresh-rate helper inside the active interactive user session.</summary>
+    /// <summary>Starts the configured refresh-rate helper in the active user session.</summary>
     public bool ApplyConfiguredUserSessionSettings(InteractiveSession session)
     {
         ArgumentNullException.ThrowIfNull(session);
         return ApplyLaptopDisplayMode(_options.CurrentValue.LaptopDisplayMode, session);
     }
 
-    /// <summary>Applies one laptop-panel preset to the active interactive user session.</summary>
+    /// <summary>Applies one laptop-panel preset to the active user session.</summary>
     /// <param name="mode">The refresh-rate and overdrive preset to apply.</param>
-    /// <param name="session">The interactive Windows session that owns the laptop display.</param>
+    /// <param name="session">The user session that owns the laptop display.</param>
     /// <returns><see langword="true"/> when the user-session refresh-rate helper was started.</returns>
     public bool ApplyLaptopDisplayMode(LaptopDisplayMode mode, InteractiveSession session)
     {
@@ -109,8 +109,7 @@ internal sealed class LaptopDisplayController
             _logger.LogWarning("Failed to start display command in session {SessionId}.", session.SessionId);
         }
 
-        // Preserve the original behavior: refresh rate is changed in the user session, while overdrive is
-        // also written immediately from Session 0 according to the requested mode/current power source.
+        // Refresh rate changes run in the user session; overdrive is applied directly.
         ApplyOverdrive(laptopDisplayMode);
         return started;
     }
@@ -157,7 +156,7 @@ internal sealed class LaptopDisplayController
         }
     }
 
-    /// <summary>Applies one MiniLED local-dimming mode through the supported ASUS firmware endpoint.</summary>
+    /// <summary>Applies a MiniLED local-dimming mode through the supported ASUS firmware endpoint.</summary>
     /// <param name="mode">The MiniLED local-dimming mode to apply.</param>
     /// <returns><see langword="true"/> when a supported firmware endpoint accepted the mode.</returns>
     public bool ApplyMiniLedMode(MiniLedMode mode)

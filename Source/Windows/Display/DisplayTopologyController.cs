@@ -4,7 +4,7 @@ using Microsoft.Extensions.Logging;
 
 namespace AsusHardwareService.Windows.Display;
 
-/// <summary>Starts display-topology changes inside the active interactive user session.</summary>
+/// <summary>Starts display-topology changes in the active user session.</summary>
 internal sealed class DisplayTopologyController
 {
     private readonly ILogger<DisplayTopologyController> _logger;

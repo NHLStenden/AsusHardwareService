@@ -8,12 +8,7 @@ using Microsoft.Extensions.Logging;
 
 namespace AsusHardwareService.Configuration;
 
-/// <summary>Persists user-adjustable hardware settings in the application's existing appsettings.json file.</summary>
-/// <remarks>
-/// Only properties represented by <see cref="HardwareSettingsPatch"/> are changed. Other configuration
-/// sections and hardware properties are preserved so appsettings.json remains the single durable
-/// configuration source for both startup state and interactive changes.
-/// </remarks>
+/// <summary>Persists hardware settings in the application's existing appsettings.json file.</summary>
 internal sealed class MutableHardwareSettingsStore
 {
     private const string SettingsFileName = "appsettings.json";
@@ -21,7 +16,7 @@ internal sealed class MutableHardwareSettingsStore
     private readonly ILogger<MutableHardwareSettingsStore> _logger;
     private readonly string _settingsPath;
 
-    /// <summary>Initializes the durable hardware-settings store.</summary>
+    /// <summary>Initializes a new instance of the <see cref="MutableHardwareSettingsStore"/> class.</summary>
     public MutableHardwareSettingsStore(
         ILogger<MutableHardwareSettingsStore> logger,
         IHostEnvironment environment)
@@ -107,7 +102,7 @@ internal sealed class MutableHardwareSettingsStore
             }
             catch
             {
-                // Best effort only; a stale temp file does not affect the active configuration.
+                // Ignore cleanup failures for temporary files.
             }
         }
     }

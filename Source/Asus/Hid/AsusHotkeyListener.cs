@@ -7,7 +7,7 @@ using Microsoft.Extensions.Options;
 namespace AsusHardwareService.Asus.Hid;
 
 /// <summary>
-/// Reads ASUS vendor HID reports and exposes them as logical hardware hotkey events.
+/// Reads ASUS HID hotkey reports.
 /// </summary>
 internal sealed class AsusHotkeyListener
 {
@@ -17,7 +17,7 @@ internal sealed class AsusHotkeyListener
     private readonly ILogger<AsusHotkeyListener> _logger;
     private readonly IOptionsMonitor<HardwareOptions> _options;
 
-    /// <summary>Initializes the ASUS HID adapter.</summary>
+    /// <summary>Initializes a new instance of the <see cref="AsusHotkeyListener"/> class.</summary>
     public AsusHotkeyListener(
         ILogger<AsusHotkeyListener> logger,
         IOptionsMonitor<HardwareOptions> options)
@@ -59,7 +59,7 @@ internal sealed class AsusHotkeyListener
                         }
                         catch
                         {
-                            // Disposing from cancellation is best effort; the listening loop handles shutdown.
+                            // The read loop also handles cancellation during shutdown.
                         }
                     },
                     inputStream);

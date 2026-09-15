@@ -5,7 +5,7 @@ using static AsusHardwareService.Presentation.Osd.OsdNativeMethods;
 namespace AsusHardwareService.Presentation.Osd;
 
 /// <summary>
-/// Computes DPI-aware layout and owns show/hide positioning and motion.
+/// Manages OSD layout and positioning.
 /// </summary>
 internal static class OsdPresenter
 {
@@ -24,8 +24,7 @@ internal static class OsdPresenter
 
     internal static void ShowStatusWindow(IntPtr window)
     {
-        // Re-check the shell for every notification as well. This covers the narrow logoff/Explorer
-        // shutdown race where the resident UI can still exist briefly after the shell has gone away.
+        // Check that the shell is still available before showing the OSD.
         if (GetShellWindow() == IntPtr.Zero)
         {
             return;
@@ -90,9 +89,7 @@ internal static class OsdPresenter
         OsdHost.WindowWidth = DipToPx(layout.WidthDip, newDpi);
         OsdHost.WindowHeight = DipToPx(layout.HeightDip, newDpi);
 
-        // Invalidate any in-flight animation before changing coordinate spaces. Posted animation
-        // frames carry a generation token, so stale frames become no-ops instead of moving the
-        // resized window using old-DPI coordinates.
+        // Cancel the current animation before applying a DPI change.
         _animationGeneration = unchecked(_animationGeneration + 1u);
         _showAnimationActive = false;
         _hideAnimationActive = false;
@@ -102,9 +99,7 @@ internal static class OsdPresenter
 
         if (IsWindowVisible(window))
         {
-            // A visible OSD is a position-anchored Shell-style surface rather than a user-draggable
-            // window. Re-anchor it to the work area at the new DPI instead of letting a suggested
-            // rectangle slowly drift the configured margin over repeated DPI changes.
+            // Re-anchor a visible OSD after a DPI change.
             var monitor = MonitorFromWindow(window, MonitorDefaultToNearest);
             var monitorInfo = new MonitorInfo
             {
@@ -124,10 +119,7 @@ internal static class OsdPresenter
         }
         else
         {
-            // ShowStatusWindow temporarily moves a hidden 1x1 HWND to a target monitor in order to
-            // query GetDpiForWindow there. During that move Windows can synchronously send
-            // WM_DPICHANGED. Preserve the suggested monitor transition while hidden; ShowStatusWindow
-            // immediately computes the final Shell anchor afterwards.
+            // ShowStatusWindow temporarily moves a hidden 1x1 HWND to a target monitor in order to query GetDpiForWindow there.
             (x, y) = GetSuggestedDpiPosition(suggestedRectPointer, _finalX, _finalY);
         }
 
@@ -166,24 +158,18 @@ internal static class OsdPresenter
         OsdHost.WindowHeight = DipToPx(layout.HeightDip, dpi);
 
         var edgeMargin = DipToPx(layout.EdgeMarginDip, dpi);
-        // Floor the bottom edge margin so fractional display scales do not push a bottom-centred
-        // indicator one physical pixel farther from the work-area edge. Element geometry still
-        // rounds each edge independently through DipToPx().
+        // Floor the bottom margin to avoid a one-pixel offset at fractional scale factors.
         var bottomEdgeMargin = DipToPxFloor(layout.EdgeMarginDip, dpi);
         var workAreaWidth = monitorInfo.rcWork.Right - monitorInfo.rcWork.Left;
         _finalX = OsdTheme.IndicatorPosition == IndicatorPosition.TopLeft
             ? monitorInfo.rcWork.Left + edgeMargin
-            // For an odd amount of free space Windows' centred indicator lands on the right-hand
-            // centre pixel. Integer division alone floors and puts our HWND one pixel left.
+            // Round odd horizontal spacing toward the right-hand center pixel.
             : monitorInfo.rcWork.Left + ((workAreaWidth - OsdHost.WindowWidth + 1) / 2);
         _finalY = OsdTheme.IndicatorPosition == IndicatorPosition.BottomCenter
             ? monitorInfo.rcWork.Bottom - OsdHost.WindowHeight - bottomEdgeMargin
             : monitorInfo.rcWork.Top + edgeMargin;
 
-        // Dismiss through the physical monitor edge, not merely a fixed translation from the
-        // resting position. Keep half a flyout of extra clearance so the DWM shadow/backdrop is
-        // also outside the visible monitor before SW_HIDE. rcMonitor is intentional: the taskbar
-        // is part of the bottom flyout's exit path.
+        // Dismiss through the physical monitor edge, not merely a fixed translation from the resting position.
         var offScreenVisualClearance = Math.Max(1, OsdHost.WindowHeight / 2);
         _hideOffScreenY = OsdTheme.IndicatorPosition == IndicatorPosition.BottomCenter
             ? monitorInfo.rcMonitor.Bottom + offScreenVisualClearance
@@ -267,10 +253,7 @@ internal static class OsdPresenter
         _showAnimationActive = incoming;
         _hideAnimationActive = !incoming;
 
-        // Present the exact source position first, then use DwmFlush only as the display-paced
-        // frame clock. DwmTransitionOwnedWindow intentionally isn't used here: that API accepts
-        // neither a duration nor an easing curve, so an application timer cannot safely decide
-        // when its compositor-owned transition has visually finished.
+        // Use DwmFlush as the frame clock for the custom transition.
         SetStatusWindowPosition(window, startY, show: true);
         UpdateWindow(window);
         if (DwmFlush() < 0)
@@ -313,9 +296,7 @@ internal static class OsdPresenter
             return;
         }
 
-        // DwmFlush is the frame clock here: it waits for the next DWM present instead of asking a
-        // low-priority WM_TIMER to approximate the display cadence. If DWM cannot pace the window,
-        // finish without animation rather than spinning the UI thread or reintroducing timer jitter.
+        // If DWM cannot pace the animation, complete it immediately.
         if (DwmFlush() < 0)
         {
             FinishWindowAnimation(window);
@@ -343,8 +324,7 @@ internal static class OsdPresenter
 
         if (_hideAnimationActive)
         {
-            // Make the last translated position a real presented frame before hiding the HWND.
-            // Otherwise the final step can be coalesced with SW_HIDE and the exit looks truncated.
+            // Present the final animation frame before hiding the window.
             DwmFlush();
             _hideAnimationActive = false;
             ShowWindow(window, SwHide);
@@ -376,7 +356,7 @@ internal static class OsdPresenter
             return 1.0;
         }
 
-        // Exact y(t) for cubic-bezier(0,0,0,1), after solving x=t^3 for the Bezier parameter.
+        // Exact y(t) for cubic-bezier(0, 0, 0, 1).
         var parameter = Math.Cbrt(progress);
         return (3.0 * parameter * parameter) - (2.0 * progress);
     }
@@ -393,7 +373,7 @@ internal static class OsdPresenter
             return 1.0;
         }
 
-        // Exact y(t) for cubic-bezier(1,0,1,1), rather than the incorrect t^3 approximation.
+        // Exact y(t) for cubic-bezier(1, 0, 1, 1).
         var parameter = 1.0 - Math.Cbrt(1.0 - progress);
         return (3.0 * parameter * parameter) -
             (2.0 * parameter * parameter * parameter);
@@ -419,10 +399,7 @@ internal static class OsdPresenter
 
     private static uint GetWindowDpiForMonitor(IntPtr window, IntPtr monitor, ref MonitorInfo monitorInfo)
     {
-        // This process is Per-Monitor V2 aware, so GetDpiForWindow returns the DPI of the monitor
-        // that hosts this HWND, including the user's display scale. If the target monitor changed,
-        // move the still non-activating window there first; this also avoids relying on the legacy
-        // GetDpiForMonitor API from a per-monitor-aware thread.
+        // This process is Per-Monitor V2 aware, so GetDpiForWindow returns the DPI of the monitor that hosts this HWND, including the user's display scale.
         var currentMonitor = MonitorFromWindow(window, MonitorDefaultToNearest);
         if (currentMonitor != monitor)
         {

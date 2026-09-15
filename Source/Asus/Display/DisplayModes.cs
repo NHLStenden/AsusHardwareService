@@ -14,10 +14,6 @@ internal enum LaptopDisplayMode
 }
 
 /// <summary>MiniLED local-dimming modes exposed by ASUS firmware.</summary>
-/// <remarks>
-/// ASUS exposes two firmware endpoints with different numeric encodings. The mapping is kept in
-/// <see cref="LaptopDisplayController"/> so these names remain independent of those protocol values.
-/// </remarks>
 internal enum MiniLedMode
 {
     /// <summary>Uses one uniform backlight zone.</summary>

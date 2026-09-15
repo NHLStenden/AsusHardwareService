@@ -4,7 +4,7 @@ using Microsoft.Extensions.Logging;
 
 namespace AsusHardwareService.Windows.Processes;
 
-/// <summary>Starts a process under the user token of an interactive Windows session from Session 0.</summary>
+/// <summary>Starts a process under the user token of an user session from Session 0.</summary>
 internal sealed class SessionProcessLauncher
 {
     private const int CreateUnicodeEnvironment = 0x00000400;

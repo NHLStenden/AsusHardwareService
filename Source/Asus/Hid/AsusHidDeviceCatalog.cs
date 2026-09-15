@@ -4,7 +4,7 @@ using HidSharp.Reports;
 
 namespace AsusHardwareService.Asus.Hid;
 
-/// <summary>Centralizes ASUS HID device filtering shared by input and keyboard-light operations.</summary>
+/// <summary>Provides access to supported ASUS HID devices.</summary>
 internal static class AsusHidDeviceCatalog
 {
     internal const int AsusVendorId = 0x0B05;
@@ -16,7 +16,7 @@ internal static class AsusHidDeviceCatalog
         0x8502, 0x1807, 0x17E0, 0x18C6, 0x1ABE, 0x1B4C, 0x1B6E, 0x1B2C, 0x8854,
     }.ToFrozenSet();
 
-    /// <summary>Enumerates ASUS HID devices that match the firmware/report requirements used by the service.</summary>
+    /// <summary>Enumerates supported ASUS HID devices.</summary>
     internal static IEnumerable<HidDevice> GetSupportedDevices() =>
         DeviceList.Local.GetHidDevices(AsusVendorId).Where(IsSupportedDevice);
 

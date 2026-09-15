@@ -6,7 +6,7 @@ using Microsoft.Extensions.Options;
 
 namespace AsusHardwareService.Asus.Splendid;
 
-/// <summary>Locates and invokes ASUS Splendid color-profile commands inside an interactive user session.</summary>
+/// <summary>Locates and invokes ASUS Splendid color-profile commands inside an user session.</summary>
 internal sealed class SplendidProfileApplier
 {
     private const string SplendidExecutableName = "AsusSplendid.exe";
@@ -30,7 +30,7 @@ internal sealed class SplendidProfileApplier
         _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
-    /// <summary>Runs the configured ASUS Splendid command sequence in the specified user session.</summary>
+    /// <summary>Runs the ASUS Splendid command sequence in the specified user session.</summary>
     public Task<bool> ApplyConfiguredProfileAsync(
         int sessionId,
         CancellationToken cancellationToken = default) =>
@@ -42,7 +42,7 @@ internal sealed class SplendidProfileApplier
             cancellationToken);
 
     /// <summary>Applies one complete ASUS Splendid display-color profile.</summary>
-    /// <param name="sessionId">The interactive Windows session that owns the display profile.</param>
+    /// <param name="sessionId">The user session that owns the display profile.</param>
     /// <param name="visualMode">The visual preset to apply.</param>
     /// <param name="gamutMode">The color gamut to apply.</param>
     /// <param name="colorTemperature">The color-temperature preset to apply.</param>

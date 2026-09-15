@@ -12,12 +12,8 @@ internal enum DisplayTopology : uint
 }
 
 /// <summary>
-/// Provides native Windows display enumeration and refresh-rate switching helpers.
+/// Provides native display functions.
 /// </summary>
-/// <remarks>
-/// These APIs must be called from the interactive user session. Calling them from a Windows service
-/// running in session 0 can return no displays or fail to change the display mode.
-/// </remarks>
 internal static class DisplayNativeMethods
 {
     private const int EnumCurrentSettings = -1;

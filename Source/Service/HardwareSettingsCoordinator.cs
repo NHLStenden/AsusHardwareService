@@ -12,19 +12,14 @@ namespace AsusHardwareService.Service;
 
 /// <summary>Application-layer result of applying a hardware-settings patch.</summary>
 /// <param name="Success">Whether all requested changes were persisted and applied.</param>
-/// <param name="Settings">The authoritative service-owned state after the operation.</param>
+/// <param name="Settings">The authoritative state after the operation.</param>
 /// <param name="Error">A user-presentable failure summary, when available.</param>
 internal sealed record HardwareSettingsUpdateResult(
     bool Success,
     HardwareSettingsSnapshot Settings,
     string? Error = null);
 
-/// <summary>Owns reads and updates of user-adjustable hardware settings.</summary>
-/// <remarks>
-/// Presentation code never writes ACPI or configuration directly. New fly-out properties should
-/// be added as patch fields and handled here so validation, persistence, and hardware application
-/// remain behind one service-owned coordination boundary.
-/// </remarks>
+/// <summary>Owns reads and updates of hardware settings.</summary>
 internal sealed class HardwareSettingsCoordinator : IDisposable
 {
     private readonly ILogger<HardwareSettingsCoordinator> _logger;
@@ -43,7 +38,7 @@ internal sealed class HardwareSettingsCoordinator : IDisposable
     private int _splendidGamutMode;
     private int _splendidColorTemperature;
 
-    /// <summary>Initializes the service-owned mutable settings coordinator.</summary>
+    /// <summary>Initializes the mutable settings coordinator.</summary>
     public HardwareSettingsCoordinator(
         ILogger<HardwareSettingsCoordinator> logger,
         BatteryChargeLimiter batteryChargeLimiter,
@@ -83,7 +78,7 @@ internal sealed class HardwareSettingsCoordinator : IDisposable
         });
     }
 
-    /// <summary>Returns the current service-owned settings and UI constraints.</summary>
+    /// <summary>Gets the current settings and UI constraints.</summary>
     /// <returns>A snapshot suitable for presentation.</returns>
     public HardwareSettingsSnapshot GetSnapshot()
     {
@@ -162,8 +157,7 @@ internal sealed class HardwareSettingsCoordinator : IDisposable
         await _updateLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            // Persist desired state first. A transient ACPI failure remains recoverable because
-            // service startup will retry the durable user selection.
+            // Persist the requested setting before applying it to hardware.
             await _settingsStore.UpdateAsync(patch, cancellationToken).ConfigureAwait(false);
 
             var chargeLimitApplied = true;

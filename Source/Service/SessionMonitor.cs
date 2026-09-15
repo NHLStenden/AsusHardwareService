@@ -9,7 +9,7 @@ using Microsoft.Extensions.Options;
 namespace AsusHardwareService.Service;
 
 /// <summary>
-/// Watches the active interactive Windows session and applies settings that cannot run from Session 0.
+/// Monitors the active user session.
 /// </summary>
 internal sealed class SessionMonitor
 {

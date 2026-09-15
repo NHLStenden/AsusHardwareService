@@ -1,7 +1,7 @@
 namespace AsusHardwareService.Asus.Hid;
 
 /// <summary>
-/// Logical hardware actions emitted by the ASUS hotkey input adapter.
+/// Defines ASUS hotkey actions.
 /// </summary>
 internal enum AsusHotkey
 {
@@ -34,7 +34,7 @@ internal enum AsusHotkey
 }
 
 /// <summary>
-/// A logical hotkey action together with its original ASUS HID event identifier.
+/// Represents an ASUS hotkey event.
 /// </summary>
 /// <param name="Hotkey">The logical service action.</param>
 /// <param name="RawEventId">The raw event identifier reported by ASUS HID firmware.</param>

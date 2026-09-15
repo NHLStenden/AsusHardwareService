@@ -5,7 +5,7 @@ using Microsoft.Extensions.Logging;
 namespace AsusHardwareService.Asus.Performance;
 
 /// <summary>
-/// Applies and tracks the paired ASUS platform-performance and GPU modes through ACPI.
+/// Controls ASUS performance and GPU modes.
 /// </summary>
 internal sealed class OperatingModeController
 {
@@ -13,7 +13,7 @@ internal sealed class OperatingModeController
     private readonly AsusAcpiClientFactory _acpiFactory;
     private readonly ILogger<OperatingModeController> _logger;
 
-    /// <summary>Initializes the ASUS performance-mode adapter.</summary>
+    /// <summary>Initializes a new instance of the <see cref="OperatingModeController"/> class.</summary>
     public OperatingModeController(
         AsusAcpiClientFactory acpiFactory,
         ILogger<OperatingModeController> logger)
@@ -25,7 +25,7 @@ internal sealed class OperatingModeController
     /// <summary>Gets the last operating-mode pair successfully applied or observed from firmware.</summary>
     public HardwareOperatingMode CurrentMode { get; private set; } = HardwareOperatingMode.Normal;
 
-    /// <summary>Applies the requested performance/GPU pair serially through ASUS ACPI.</summary>
+    /// <summary>Applies the requested performance/GPU pair serially using ASUS ACPI.</summary>
     /// <returns><see langword="true"/> when both parts are applied or already active.</returns>
     public async Task<bool> ApplyAsync(
         HardwareOperatingMode mode,
@@ -144,7 +144,7 @@ internal sealed class OperatingModeController
 
     private bool HasGpuModeSupport() => ReadGpuEcoFlag() >= 0;
 
-    // Behavioral parity: the source application contained this as an explicit stub and did not implement eGPU detection.
+    // eGPU detection is not currently implemented.
     private static bool IsExternalGpuConnected() => false;
 
     private async Task<bool> ApplyEcoModeTransitionAsync(bool enableEcoMode, CancellationToken cancellationToken)

@@ -6,7 +6,7 @@ using Microsoft.Extensions.Options;
 
 namespace AsusHardwareService.Asus.Keyboard;
 
-/// <summary>Reads ASUS keyboard-backlight state from ACPI and writes levels through vendor HID.</summary>
+/// <summary>Reads ASUS keyboard-backlight state from ACPI and writes levels using HID.</summary>
 internal sealed class KeyboardBacklightController
 {
     private const int MinimumLevel = 0;
@@ -20,7 +20,7 @@ internal sealed class KeyboardBacklightController
     private readonly IOptionsMonitor<HardwareOptions> _options;
     private int? _lastKnownLevel;
 
-    /// <summary>Initializes the ASUS keyboard-backlight adapter.</summary>
+    /// <summary>Initializes a new instance of the <see cref="KeyboardBacklightController"/> class.</summary>
     public KeyboardBacklightController(
         ILogger<KeyboardBacklightController> logger,
         AsusAcpiClientFactory acpiFactory,

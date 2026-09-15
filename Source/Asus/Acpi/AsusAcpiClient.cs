@@ -28,7 +28,7 @@ internal sealed class AsusAcpiClient : IDisposable
     private readonly SafeFileHandle _deviceHandle;
     private bool _disposed;
 
-    /// <summary>Initializes a client and opens the ASUS ACPI device handle.</summary>
+    /// <summary>Initializes a new instance of the <see cref="AsusAcpiClient"/> class.</summary>
     public AsusAcpiClient(ILogger<AsusAcpiClient> logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -48,7 +48,7 @@ internal sealed class AsusAcpiClient : IDisposable
         }
     }
 
-    /// <summary>Gets whether the ASUS ACPI device was opened successfully.</summary>
+    /// <summary>Gets a value indicating whether the ASUS ACPI device was opened successfully.</summary>
     public bool IsConnected { get; }
 
     /// <summary>Writes an integer value to an ASUS ACPI device identifier.</summary>

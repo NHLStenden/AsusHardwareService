@@ -8,7 +8,7 @@ using Microsoft.Extensions.Options;
 namespace AsusHardwareService.Service;
 
 /// <summary>
-/// Applies service-owned hardware state that must be restored when the Windows service starts.
+/// Restores hardware settings when the service starts.
 /// </summary>
 internal sealed class StartupInitializer
 {

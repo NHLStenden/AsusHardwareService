@@ -7,7 +7,7 @@ namespace AsusHardwareService.Windows.Power;
 internal static class PowerStatus
 {
     /// <summary>
-    /// Returns whether Windows currently reports AC power.
+    /// Determines whether Windows currently reports AC power.
     /// </summary>
     /// <returns><see langword="true"/> when AC power is online; otherwise, <see langword="false"/>.</returns>
     public static bool IsOnAcPower()
