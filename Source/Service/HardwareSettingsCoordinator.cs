@@ -1,7 +1,9 @@
 using AsusHardwareService.Asus.Battery;
+using AsusHardwareService.Asus.Display;
 using AsusHardwareService.Asus.Performance;
 using AsusHardwareService.Configuration;
 using AsusHardwareService.Settings;
+using AsusHardwareService.Windows.Sessions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -27,32 +29,41 @@ internal sealed class HardwareSettingsCoordinator : IDisposable
     private readonly ILogger<HardwareSettingsCoordinator> _logger;
     private readonly BatteryChargeLimiter _batteryChargeLimiter;
     private readonly OperatingModeController _operatingModeController;
+    private readonly LaptopDisplayController _laptopDisplayController;
+    private readonly UserSessionService _userSessionService;
     private readonly MutableHardwareSettingsStore _settingsStore;
     private readonly SemaphoreSlim _updateLock = new(1, 1);
     private readonly IDisposable? _optionsSubscription;
     private int _batteryChargeLimitPercent;
+    private int _laptopDisplayMode;
 
     /// <summary>Initializes the service-owned mutable settings coordinator.</summary>
     public HardwareSettingsCoordinator(
         ILogger<HardwareSettingsCoordinator> logger,
         BatteryChargeLimiter batteryChargeLimiter,
         OperatingModeController operatingModeController,
+        LaptopDisplayController laptopDisplayController,
+        UserSessionService userSessionService,
         MutableHardwareSettingsStore settingsStore,
         IOptionsMonitor<HardwareOptions> options)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _batteryChargeLimiter = batteryChargeLimiter ?? throw new ArgumentNullException(nameof(batteryChargeLimiter));
         _operatingModeController = operatingModeController ?? throw new ArgumentNullException(nameof(operatingModeController));
+        _laptopDisplayController = laptopDisplayController ?? throw new ArgumentNullException(nameof(laptopDisplayController));
+        _userSessionService = userSessionService ?? throw new ArgumentNullException(nameof(userSessionService));
         _settingsStore = settingsStore ?? throw new ArgumentNullException(nameof(settingsStore));
         ArgumentNullException.ThrowIfNull(options);
 
         _batteryChargeLimitPercent = BatteryChargeLimitPolicy.Normalize(
             options.CurrentValue.BatteryChargeLimitPercent);
+        _laptopDisplayMode = (int)options.CurrentValue.LaptopDisplayMode;
         _optionsSubscription = options.OnChange((value, _) =>
         {
             Interlocked.Exchange(
                 ref _batteryChargeLimitPercent,
                 BatteryChargeLimitPolicy.Normalize(value.BatteryChargeLimitPercent));
+            Interlocked.Exchange(ref _laptopDisplayMode, (int)value.LaptopDisplayMode);
         });
     }
 
@@ -67,7 +78,8 @@ internal sealed class HardwareSettingsCoordinator : IDisposable
                 BatteryChargeLimitPolicy.MinimumPercent,
                 BatteryChargeLimitPolicy.MaximumPercent,
                 BatteryChargeLimitPolicy.StepPercent),
-            _operatingModeController.CurrentMode.ToPreset());
+            _operatingModeController.CurrentMode.ToPreset(),
+            (LaptopDisplayMode)Volatile.Read(ref _laptopDisplayMode));
     }
 
     /// <summary>Validates, persists, and applies a partial user settings update.</summary>
@@ -95,6 +107,12 @@ internal sealed class HardwareSettingsCoordinator : IDisposable
         if (patch.OperatingMode is { } operatingMode && !Enum.IsDefined(typeof(OperatingModePreset), operatingMode))
         {
             return Failure("Unsupported operating mode.");
+        }
+
+        if (patch.LaptopDisplayMode is { } laptopDisplayMode &&
+            !Enum.IsDefined(typeof(LaptopDisplayMode), laptopDisplayMode))
+        {
+            return Failure("Unsupported laptop screen mode.");
         }
 
         await _updateLock.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -132,16 +150,40 @@ internal sealed class HardwareSettingsCoordinator : IDisposable
                 }
             }
 
-            if (chargeLimitApplied && operatingModeApplied)
+            var laptopDisplayModeApplied = true;
+            if (patch.LaptopDisplayMode is { } requestedLaptopDisplayMode)
+            {
+                Interlocked.Exchange(ref _laptopDisplayMode, (int)requestedLaptopDisplayMode);
+                var session = _userSessionService.GetActiveSession();
+                laptopDisplayModeApplied = session is not null &&
+                    _laptopDisplayController.ApplyLaptopDisplayMode(requestedLaptopDisplayMode, session);
+                if (!laptopDisplayModeApplied)
+                {
+                    _logger.LogWarning(
+                        "Laptop display mode {LaptopDisplayMode} was persisted but could not be applied immediately.",
+                        requestedLaptopDisplayMode);
+                }
+            }
+
+            if (chargeLimitApplied && operatingModeApplied && laptopDisplayModeApplied)
             {
                 return Success();
             }
 
-            return Failure(patch.BatteryChargeLimitPercent.HasValue && patch.OperatingMode.HasValue
-                ? "Saved; some settings were not applied."
-                : chargeLimitApplied
+            var requestedSettingCount =
+                (patch.BatteryChargeLimitPercent.HasValue ? 1 : 0) +
+                (patch.OperatingMode.HasValue ? 1 : 0) +
+                (patch.LaptopDisplayMode.HasValue ? 1 : 0);
+            if (requestedSettingCount > 1)
+            {
+                return Failure("Saved; some settings were not applied.");
+            }
+
+            return Failure(!chargeLimitApplied
+                ? "Saved; charge limit was not applied."
+                : !operatingModeApplied
                     ? "Saved; operating mode was not applied."
-                    : "Saved; charge limit was not applied.");
+                    : "Saved; laptop screen mode was not applied.");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using AsusHardwareService.Asus.Display;
 using AsusHardwareService.Asus.Performance;
 using AsusHardwareService.Settings;
 using Microsoft.Extensions.Hosting;
@@ -60,6 +61,11 @@ internal sealed class MutableHardwareSettingsStore
             var hardwareMode = HardwareOperatingMode.FromPreset(operatingMode);
             hardware["PerformanceMode"] = hardwareMode.Performance.ToString();
             hardware["GpuMode"] = hardwareMode.Gpu.ToString();
+        }
+
+        if (patch.LaptopDisplayMode is { } laptopDisplayMode)
+        {
+            hardware["LaptopScreenMode"] = laptopDisplayMode.ToString();
         }
 
         var json = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine;

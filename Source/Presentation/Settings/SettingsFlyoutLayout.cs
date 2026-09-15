@@ -1,3 +1,4 @@
+using AsusHardwareService.Asus.Display;
 using AsusHardwareService.Asus.Performance;
 using AsusHardwareService.Presentation.Osd;
 using static AsusHardwareService.Presentation.Osd.OsdNativeMethods;
@@ -12,6 +13,9 @@ internal enum SettingsFlyoutFocusedControl
 
     /// <summary>The mutually-exclusive operating-mode selector.</summary>
     OperatingMode,
+
+    /// <summary>The mutually-exclusive laptop-screen selector.</summary>
+    LaptopDisplayMode,
 }
 
 /// <summary>DPI-independent geometry for the interactive Windows 11-style settings fly-out.</summary>
@@ -21,7 +25,7 @@ internal static class SettingsFlyoutLayout
     // Quick Settings tile rhythm, so the fly-out grows vertically rather than compressing labels
     // into command-button rectangles.
     internal const double WidthDip = 360.0;
-    internal const double HeightDip = 224.0;
+    internal const double HeightDip = 328.0;
     internal const double EdgeMarginDip = 12.0;
 
     internal static readonly DipRect TitleRect = new(20.0, 12.0, 292.0, 38.0);
@@ -40,7 +44,15 @@ internal static class SettingsFlyoutLayout
     internal static readonly DipRect EcoLabelRect = new(20.0, 164.0, 120.0, 188.0);
     internal static readonly DipRect BalancedLabelRect = new(130.0, 164.0, 230.0, 188.0);
     internal static readonly DipRect TurboLabelRect = new(240.0, 164.0, 340.0, 188.0);
-    internal static readonly DipRect StatusRect = new(20.0, 194.0, 340.0, 216.0);
+
+    internal static readonly DipRect LaptopDisplayModeTitleRect = new(20.0, 194.0, 340.0, 218.0);
+    internal static readonly DipRect DisplayAutoButtonRect = new(20.0, 222.0, 120.0, 270.0);
+    internal static readonly DipRect Display60ButtonRect = new(130.0, 222.0, 230.0, 270.0);
+    internal static readonly DipRect Display240ButtonRect = new(240.0, 222.0, 340.0, 270.0);
+    internal static readonly DipRect DisplayAutoLabelRect = new(20.0, 274.0, 120.0, 298.0);
+    internal static readonly DipRect Display60LabelRect = new(130.0, 274.0, 230.0, 298.0);
+    internal static readonly DipRect Display240LabelRect = new(240.0, 274.0, 340.0, 298.0);
+    internal static readonly DipRect StatusRect = new(20.0, 304.0, 340.0, 326.0);
 
     /// <summary>Returns a touch-friendly hit target around the visible slider track.</summary>
     internal static PixelRect GetSliderHitRect(uint dpi)
@@ -84,6 +96,35 @@ internal static class SettingsFlyoutLayout
         return false;
     }
 
+    /// <summary>Returns the laptop-screen preset under the supplied client point, when present.</summary>
+    internal static bool TryGetLaptopDisplayModeAtPoint(
+        uint dpi,
+        int x,
+        int y,
+        out LaptopDisplayMode laptopDisplayMode)
+    {
+        if (Contains(OsdLayout.ToPixels(GetLaptopDisplayModeHitRect(LaptopDisplayMode.Auto), dpi), x, y))
+        {
+            laptopDisplayMode = LaptopDisplayMode.Auto;
+            return true;
+        }
+
+        if (Contains(OsdLayout.ToPixels(GetLaptopDisplayModeHitRect(LaptopDisplayMode.Hz60), dpi), x, y))
+        {
+            laptopDisplayMode = LaptopDisplayMode.Hz60;
+            return true;
+        }
+
+        if (Contains(OsdLayout.ToPixels(GetLaptopDisplayModeHitRect(LaptopDisplayMode.Hz240Overdrive), dpi), x, y))
+        {
+            laptopDisplayMode = LaptopDisplayMode.Hz240Overdrive;
+            return true;
+        }
+
+        laptopDisplayMode = default;
+        return false;
+    }
+
     /// <summary>Returns the Quick Settings-style action-tile geometry for one operating-mode option.</summary>
     internal static DipRect GetOperatingModeRect(OperatingModePreset operatingMode) => operatingMode switch
     {
@@ -110,6 +151,38 @@ internal static class SettingsFlyoutLayout
         return new DipRect(tile.Left, tile.Top, tile.Right, label.Bottom);
     }
 
+    /// <summary>Returns the Quick Settings-style action-tile geometry for one laptop-screen option.</summary>
+    internal static DipRect GetLaptopDisplayModeRect(LaptopDisplayMode laptopDisplayMode) => laptopDisplayMode switch
+    {
+        LaptopDisplayMode.Auto => DisplayAutoButtonRect,
+        LaptopDisplayMode.Hz60 => Display60ButtonRect,
+        LaptopDisplayMode.Hz240Overdrive => Display240ButtonRect,
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(laptopDisplayMode),
+            laptopDisplayMode,
+            "Unsupported laptop display mode."),
+    };
+
+    /// <summary>Returns the label geometry beneath one laptop-screen action tile.</summary>
+    internal static DipRect GetLaptopDisplayModeLabelRect(LaptopDisplayMode laptopDisplayMode) => laptopDisplayMode switch
+    {
+        LaptopDisplayMode.Auto => DisplayAutoLabelRect,
+        LaptopDisplayMode.Hz60 => Display60LabelRect,
+        LaptopDisplayMode.Hz240Overdrive => Display240LabelRect,
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(laptopDisplayMode),
+            laptopDisplayMode,
+            "Unsupported laptop display mode."),
+    };
+
+    /// <summary>Returns the combined tile-and-label pointer target for one laptop-screen action.</summary>
+    internal static DipRect GetLaptopDisplayModeHitRect(LaptopDisplayMode laptopDisplayMode)
+    {
+        var tile = GetLaptopDisplayModeRect(laptopDisplayMode);
+        var label = GetLaptopDisplayModeLabelRect(laptopDisplayMode);
+        return new DipRect(tile.Left, tile.Top, tile.Right, label.Bottom);
+    }
+
     private static bool Contains(PixelRect rect, int x, int y) =>
         x >= rect.Left && x <= rect.Right && y >= rect.Top && y <= rect.Bottom;
 }
@@ -122,6 +195,9 @@ internal readonly record struct SettingsFlyoutViewModel(
     OperatingModePreset? OperatingMode,
     OperatingModePreset? HoveredOperatingMode,
     OperatingModePreset? PressedOperatingMode,
+    LaptopDisplayMode LaptopDisplayMode,
+    LaptopDisplayMode? HoveredLaptopDisplayMode,
+    LaptopDisplayMode? PressedLaptopDisplayMode,
     bool IsAvailable,
     bool IsApplying,
     bool IsDragging,

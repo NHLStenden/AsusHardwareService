@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using AsusHardwareService.Asus.Display;
 using AsusHardwareService.Asus.Performance;
 using AsusHardwareService.Presentation.Osd;
 using AsusHardwareService.Settings;
@@ -37,6 +38,10 @@ internal static class SettingsFlyoutWindow
     private static OperatingModePreset? _committedOperatingMode;
     private static OperatingModePreset? _hoveredOperatingMode;
     private static OperatingModePreset? _pressedOperatingMode;
+    private static LaptopDisplayMode _laptopDisplayMode = LaptopDisplayMode.Auto;
+    private static LaptopDisplayMode _committedLaptopDisplayMode = LaptopDisplayMode.Auto;
+    private static LaptopDisplayMode? _hoveredLaptopDisplayMode;
+    private static LaptopDisplayMode? _pressedLaptopDisplayMode;
     private static SettingsFlyoutFocusedControl _focusedControl = SettingsFlyoutFocusedControl.BatteryChargeLimit;
     private static bool _isAvailable;
     private static bool _isLoading;
@@ -193,6 +198,25 @@ internal static class SettingsFlyoutWindow
                     InvalidateOperatingModeTile(window, operatingMode);
                     return IntPtr.Zero;
                 }
+
+                if (CanEdit() &&
+                    TryGetLaptopDisplayModeAtPoint(
+                        window,
+                        GetMouseX(lParam),
+                        GetMouseY(lParam),
+                        out var laptopDisplayMode))
+                {
+                    KillTimer(window, ApplyDebounceTimerId);
+                    _focusedControl = SettingsFlyoutFocusedControl.LaptopDisplayMode;
+                    var hoveredDisplayModeBeforePress = _hoveredLaptopDisplayMode;
+                    _hoveredLaptopDisplayMode = laptopDisplayMode;
+                    _pressedLaptopDisplayMode = laptopDisplayMode;
+                    EnsureMouseLeaveTracking(window);
+                    SetCapture(window);
+                    InvalidateLaptopDisplayModeTile(window, hoveredDisplayModeBeforePress);
+                    InvalidateLaptopDisplayModeTile(window, laptopDisplayMode);
+                    return IntPtr.Zero;
+                }
                 return IntPtr.Zero;
 
             case WmMouseMove:
@@ -203,7 +227,7 @@ internal static class SettingsFlyoutWindow
                     return IntPtr.Zero;
                 }
 
-                UpdateOperatingModeHover(window, GetMouseX(lParam), GetMouseY(lParam));
+                UpdateTileHover(window, GetMouseX(lParam), GetMouseY(lParam));
                 return IntPtr.Zero;
 
             case WmMouseLeave:
@@ -212,6 +236,11 @@ internal static class SettingsFlyoutWindow
                 {
                     _hoveredOperatingMode = null;
                     InvalidateOperatingModeTile(window, previouslyHoveredMode);
+                }
+                if (_hoveredLaptopDisplayMode is { } previouslyHoveredDisplayMode)
+                {
+                    _hoveredLaptopDisplayMode = null;
+                    InvalidateLaptopDisplayModeTile(window, previouslyHoveredDisplayMode);
                 }
                 return IntPtr.Zero;
 
@@ -240,7 +269,7 @@ internal static class SettingsFlyoutWindow
                         releasedOperatingMode == pressedOperatingMode;
                     _pressedOperatingMode = null;
                     ReleaseCapture();
-                    UpdateOperatingModeHover(window, GetMouseX(lParam), GetMouseY(lParam));
+                    UpdateTileHover(window, GetMouseX(lParam), GetMouseY(lParam));
                     InvalidateOperatingModeTile(window, pressedOperatingMode);
                     if (shouldCommit)
                     {
@@ -248,20 +277,43 @@ internal static class SettingsFlyoutWindow
                         BeginApply(window);
                     }
                 }
+
+                if (_pressedLaptopDisplayMode is { } pressedLaptopDisplayMode)
+                {
+                    var shouldCommit = CanEdit() &&
+                        TryGetLaptopDisplayModeAtPoint(
+                            window,
+                            GetMouseX(lParam),
+                            GetMouseY(lParam),
+                            out var releasedLaptopDisplayMode) &&
+                        releasedLaptopDisplayMode == pressedLaptopDisplayMode;
+                    _pressedLaptopDisplayMode = null;
+                    ReleaseCapture();
+                    UpdateTileHover(window, GetMouseX(lParam), GetMouseY(lParam));
+                    InvalidateLaptopDisplayModeTile(window, pressedLaptopDisplayMode);
+                    if (shouldCommit)
+                    {
+                        SetLaptopDisplayMode(window, pressedLaptopDisplayMode);
+                        BeginApply(window);
+                    }
+                }
                 return IntPtr.Zero;
 
             case WmCaptureChanged:
-                if (_isDragging || _pressedOperatingMode is not null)
+                if (_isDragging || _pressedOperatingMode is not null || _pressedLaptopDisplayMode is not null)
                 {
                     var wasDragging = _isDragging;
                     var previouslyPressedMode = _pressedOperatingMode;
+                    var previouslyPressedDisplayMode = _pressedLaptopDisplayMode;
                     _isDragging = false;
                     _pressedOperatingMode = null;
+                    _pressedLaptopDisplayMode = null;
                     if (wasDragging)
                     {
                         InvalidateDipRect(window, SettingsFlyoutLayout.SliderVisualRect);
                     }
                     InvalidateOperatingModeTile(window, previouslyPressedMode);
+                    InvalidateLaptopDisplayModeTile(window, previouslyPressedDisplayMode);
                 }
                 return IntPtr.Zero;
 
@@ -277,9 +329,12 @@ internal static class SettingsFlyoutWindow
                 {
                     var previouslyFocusedControl = _focusedControl;
                     var focusWasVisible = _showFocusVisual;
-                    _focusedControl = _focusedControl == SettingsFlyoutFocusedControl.BatteryChargeLimit
-                        ? SettingsFlyoutFocusedControl.OperatingMode
-                        : SettingsFlyoutFocusedControl.BatteryChargeLimit;
+                    _focusedControl = _focusedControl switch
+                    {
+                        SettingsFlyoutFocusedControl.BatteryChargeLimit => SettingsFlyoutFocusedControl.OperatingMode,
+                        SettingsFlyoutFocusedControl.OperatingMode => SettingsFlyoutFocusedControl.LaptopDisplayMode,
+                        _ => SettingsFlyoutFocusedControl.BatteryChargeLimit,
+                    };
                     _showFocusVisual = true;
                     if (focusWasVisible)
                     {
@@ -291,9 +346,13 @@ internal static class SettingsFlyoutWindow
 
                 if (CanEdit())
                 {
-                    var handled = _focusedControl == SettingsFlyoutFocusedControl.BatteryChargeLimit
-                        ? HandleBatteryKeyAdjustment(window, key)
-                        : HandleOperatingModeKeyAdjustment(window, key);
+                    var handled = _focusedControl switch
+                    {
+                        SettingsFlyoutFocusedControl.BatteryChargeLimit => HandleBatteryKeyAdjustment(window, key),
+                        SettingsFlyoutFocusedControl.OperatingMode => HandleOperatingModeKeyAdjustment(window, key),
+                        SettingsFlyoutFocusedControl.LaptopDisplayMode => HandleLaptopDisplayModeKeyAdjustment(window, key),
+                        _ => false,
+                    };
                     if (handled)
                     {
                         var focusWasVisible = _showFocusVisual;
@@ -421,7 +480,10 @@ internal static class SettingsFlyoutWindow
 
         var chargeLimit = _value != _committedValue ? _value : (int?)null;
         var operatingMode = _operatingMode != _committedOperatingMode ? _operatingMode : null;
-        var patch = new HardwareSettingsPatch(chargeLimit, operatingMode);
+        var laptopDisplayMode = _laptopDisplayMode != _committedLaptopDisplayMode
+            ? _laptopDisplayMode
+            : (LaptopDisplayMode?)null;
+        var patch = new HardwareSettingsPatch(chargeLimit, operatingMode, laptopDisplayMode);
         if (patch.IsEmpty)
         {
             return;
@@ -470,6 +532,7 @@ internal static class SettingsFlyoutWindow
         else
         {
             _value = _committedValue;
+            _laptopDisplayMode = _committedLaptopDisplayMode;
             _isAvailable = false;
             _statusText = "Service unavailable.";
         }
@@ -509,6 +572,8 @@ internal static class SettingsFlyoutWindow
         _value = _committedValue;
         _committedOperatingMode = snapshot.OperatingMode;
         _operatingMode = _committedOperatingMode;
+        _committedLaptopDisplayMode = snapshot.LaptopDisplayMode;
+        _laptopDisplayMode = _committedLaptopDisplayMode;
     }
 
     private static bool HandleBatteryKeyAdjustment(IntPtr window, int key)
@@ -580,6 +645,45 @@ internal static class SettingsFlyoutWindow
         return true;
     }
 
+    private static bool HandleLaptopDisplayModeKeyAdjustment(IntPtr window, int key)
+    {
+        LaptopDisplayMode next;
+        switch (key)
+        {
+            case VkLeft:
+            case VkDown:
+                next = _laptopDisplayMode switch
+                {
+                    LaptopDisplayMode.Hz240Overdrive => LaptopDisplayMode.Hz60,
+                    LaptopDisplayMode.Hz60 => LaptopDisplayMode.Auto,
+                    _ => LaptopDisplayMode.Auto,
+                };
+                break;
+            case VkRight:
+            case VkUp:
+                next = _laptopDisplayMode switch
+                {
+                    LaptopDisplayMode.Auto => LaptopDisplayMode.Hz60,
+                    LaptopDisplayMode.Hz60 => LaptopDisplayMode.Hz240Overdrive,
+                    _ => LaptopDisplayMode.Hz240Overdrive,
+                };
+                break;
+            case VkHome:
+                next = LaptopDisplayMode.Auto;
+                break;
+            case VkEnd:
+                next = LaptopDisplayMode.Hz240Overdrive;
+                break;
+            default:
+                return false;
+        }
+
+        SetLaptopDisplayMode(window, next);
+        KillTimer(window, ApplyDebounceTimerId);
+        SetTimer(window, ApplyDebounceTimerId, ApplyDebounceMilliseconds, IntPtr.Zero);
+        return true;
+    }
+
     private static void UpdateValueFromMouse(IntPtr window, int mouseX)
     {
         var dpi = GetDpiForWindow(window);
@@ -635,6 +739,25 @@ internal static class SettingsFlyoutWindow
         }
     }
 
+    private static void SetLaptopDisplayMode(IntPtr window, LaptopDisplayMode laptopDisplayMode)
+    {
+        if (_laptopDisplayMode == laptopDisplayMode)
+        {
+            return;
+        }
+
+        var previousLaptopDisplayMode = _laptopDisplayMode;
+        _laptopDisplayMode = laptopDisplayMode;
+        var hadStatusText = !string.IsNullOrWhiteSpace(_statusText);
+        _statusText = null;
+        InvalidateLaptopDisplayModeTile(window, previousLaptopDisplayMode);
+        InvalidateLaptopDisplayModeTile(window, laptopDisplayMode);
+        if (hadStatusText)
+        {
+            InvalidateDipRect(window, SettingsFlyoutLayout.StatusRect);
+        }
+    }
+
     private static int NormalizeToStep(int value)
     {
         var clamped = Math.Clamp(value, _minimum, _maximum);
@@ -671,6 +794,21 @@ internal static class SettingsFlyoutWindow
         return SettingsFlyoutLayout.TryGetOperatingModeAtPoint(dpi, x, y, out operatingMode);
     }
 
+    private static bool TryGetLaptopDisplayModeAtPoint(
+        IntPtr window,
+        int x,
+        int y,
+        out LaptopDisplayMode laptopDisplayMode)
+    {
+        var dpi = GetDpiForWindow(window);
+        if (dpi == 0)
+        {
+            dpi = 96;
+        }
+
+        return SettingsFlyoutLayout.TryGetLaptopDisplayModeAtPoint(dpi, x, y, out laptopDisplayMode);
+    }
+
     private static void EnsureMouseLeaveTracking(IntPtr window)
     {
         if (_trackingMouseLeave)
@@ -687,23 +825,37 @@ internal static class SettingsFlyoutWindow
         _trackingMouseLeave = TrackMouseEvent(ref tracking);
     }
 
-    private static void UpdateOperatingModeHover(IntPtr window, int x, int y)
+    private static void UpdateTileHover(IntPtr window, int x, int y)
     {
-        OperatingModePreset? hovered = null;
-        if (CanEdit() && TryGetOperatingModeAtPoint(window, x, y, out var operatingMode))
+        OperatingModePreset? hoveredOperatingMode = null;
+        LaptopDisplayMode? hoveredLaptopDisplayMode = null;
+        if (CanEdit())
         {
-            hovered = operatingMode;
+            if (TryGetOperatingModeAtPoint(window, x, y, out var operatingMode))
+            {
+                hoveredOperatingMode = operatingMode;
+            }
+            else if (TryGetLaptopDisplayModeAtPoint(window, x, y, out var laptopDisplayMode))
+            {
+                hoveredLaptopDisplayMode = laptopDisplayMode;
+            }
         }
 
-        if (_hoveredOperatingMode == hovered)
+        if (_hoveredOperatingMode != hoveredOperatingMode)
         {
-            return;
+            var previouslyHoveredOperatingMode = _hoveredOperatingMode;
+            _hoveredOperatingMode = hoveredOperatingMode;
+            InvalidateOperatingModeTile(window, previouslyHoveredOperatingMode);
+            InvalidateOperatingModeTile(window, hoveredOperatingMode);
         }
 
-        var previouslyHoveredMode = _hoveredOperatingMode;
-        _hoveredOperatingMode = hovered;
-        InvalidateOperatingModeTile(window, previouslyHoveredMode);
-        InvalidateOperatingModeTile(window, hovered);
+        if (_hoveredLaptopDisplayMode != hoveredLaptopDisplayMode)
+        {
+            var previouslyHoveredLaptopDisplayMode = _hoveredLaptopDisplayMode;
+            _hoveredLaptopDisplayMode = hoveredLaptopDisplayMode;
+            InvalidateLaptopDisplayModeTile(window, previouslyHoveredLaptopDisplayMode);
+            InvalidateLaptopDisplayModeTile(window, hoveredLaptopDisplayMode);
+        }
     }
 
     /// <summary>Invalidates only the stateful surface of one operating-mode action tile.</summary>
@@ -720,16 +872,35 @@ internal static class SettingsFlyoutWindow
             new DipRect(rect.Left - 1.0, rect.Top - 1.0, rect.Right + 1.0, rect.Bottom + 1.0));
     }
 
-    /// <summary>Invalidates the currently visible keyboard focus cue without repainting the fly-out.</summary>
-    private static void InvalidateFocusVisual(IntPtr window, SettingsFlyoutFocusedControl control)
+    /// <summary>Invalidates only the stateful surface of one laptop-screen action tile.</summary>
+    private static void InvalidateLaptopDisplayModeTile(IntPtr window, LaptopDisplayMode? laptopDisplayMode)
     {
-        if (control == SettingsFlyoutFocusedControl.BatteryChargeLimit)
+        if (laptopDisplayMode is not { } mode)
         {
-            InvalidateDipRect(window, SettingsFlyoutLayout.SliderVisualRect);
             return;
         }
 
-        InvalidateOperatingModeTile(window, _operatingMode ?? OperatingModePreset.Normal);
+        var rect = SettingsFlyoutLayout.GetLaptopDisplayModeRect(mode);
+        InvalidateDipRect(
+            window,
+            new DipRect(rect.Left - 1.0, rect.Top - 1.0, rect.Right + 1.0, rect.Bottom + 1.0));
+    }
+
+    /// <summary>Invalidates the currently visible keyboard focus cue without repainting the fly-out.</summary>
+    private static void InvalidateFocusVisual(IntPtr window, SettingsFlyoutFocusedControl control)
+    {
+        switch (control)
+        {
+            case SettingsFlyoutFocusedControl.BatteryChargeLimit:
+                InvalidateDipRect(window, SettingsFlyoutLayout.SliderVisualRect);
+                break;
+            case SettingsFlyoutFocusedControl.OperatingMode:
+                InvalidateOperatingModeTile(window, _operatingMode ?? OperatingModePreset.Normal);
+                break;
+            case SettingsFlyoutFocusedControl.LaptopDisplayMode:
+                InvalidateLaptopDisplayModeTile(window, _laptopDisplayMode);
+                break;
+        }
     }
 
     /// <summary>Invalidates a DPI-independent client rectangle without erasing the Acrylic surface.</summary>
@@ -762,6 +933,9 @@ internal static class SettingsFlyoutWindow
             _operatingMode,
             _hoveredOperatingMode,
             _pressedOperatingMode,
+            _laptopDisplayMode,
+            _hoveredLaptopDisplayMode,
+            _pressedLaptopDisplayMode,
             _isAvailable,
             _isApplying,
             _isDragging,
@@ -779,21 +953,25 @@ internal static class SettingsFlyoutWindow
         _isDismissing = true;
         SettingsFlyoutLightDismiss.Stop();
 
-        if (_isDragging || _pressedOperatingMode is not null)
+        if (_isDragging || _pressedOperatingMode is not null || _pressedLaptopDisplayMode is not null)
         {
             _isDragging = false;
             _pressedOperatingMode = null;
+            _pressedLaptopDisplayMode = null;
             ReleaseCapture();
         }
 
         // The HWND is intentionally kept resident after a normal dismissal. Do not carry a stale
         // pointer-over state into the next keyboard-triggered presentation.
         _hoveredOperatingMode = null;
+        _hoveredLaptopDisplayMode = null;
         _trackingMouseLeave = false;
 
         if (commitPendingChange &&
             CanEdit() &&
-            (_value != _committedValue || _operatingMode != _committedOperatingMode))
+            (_value != _committedValue ||
+             _operatingMode != _committedOperatingMode ||
+             _laptopDisplayMode != _committedLaptopDisplayMode))
         {
             _closeAfterOperation = true;
             BeginApply(window);
@@ -806,6 +984,7 @@ internal static class SettingsFlyoutWindow
             KillTimer(window, ApplyDebounceTimerId);
             _value = _committedValue;
             _operatingMode = _committedOperatingMode;
+            _laptopDisplayMode = _committedLaptopDisplayMode;
         }
 
         if (_isLoading || _isApplying)
@@ -1144,6 +1323,10 @@ internal static class SettingsFlyoutWindow
         _committedOperatingMode = null;
         _hoveredOperatingMode = null;
         _pressedOperatingMode = null;
+        _laptopDisplayMode = LaptopDisplayMode.Auto;
+        _committedLaptopDisplayMode = LaptopDisplayMode.Auto;
+        _hoveredLaptopDisplayMode = null;
+        _pressedLaptopDisplayMode = null;
         _focusedControl = SettingsFlyoutFocusedControl.BatteryChargeLimit;
         _isAvailable = false;
         _isLoading = false;

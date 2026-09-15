@@ -45,26 +45,35 @@ internal sealed class LaptopDisplayController
         ApplyMiniLed(options.MiniLedMode);
     }
 
-    /// <summary>Starts the refresh-rate helper inside the active interactive user session.</summary>
+    /// <summary>Starts the configured refresh-rate helper inside the active interactive user session.</summary>
     public bool ApplyConfiguredUserSessionSettings(InteractiveSession session)
     {
         ArgumentNullException.ThrowIfNull(session);
         return ApplyLaptopDisplayMode(_options.CurrentValue.LaptopDisplayMode, session);
     }
 
-    private bool ApplyLaptopDisplayMode(LaptopDisplayMode mode, InteractiveSession session)
+    /// <summary>Applies one laptop-panel preset to the active interactive user session.</summary>
+    /// <param name="mode">The refresh-rate and overdrive preset to apply.</param>
+    /// <param name="session">The interactive Windows session that owns the laptop display.</param>
+    /// <returns><see langword="true"/> when the user-session refresh-rate helper was started.</returns>
+    public bool ApplyLaptopDisplayMode(LaptopDisplayMode mode, InteractiveSession session)
     {
+        ArgumentNullException.ThrowIfNull(session);
+
         return mode switch
         {
             LaptopDisplayMode.Auto => StartDisplayCommand(
                 session,
-                DisplayCommand.ScreenModeAuto),
+                DisplayCommand.ScreenModeAuto,
+                mode),
             LaptopDisplayMode.Hz60 => StartDisplayCommand(
                 session,
-                DisplayCommand.ScreenMode60Hz),
+                DisplayCommand.ScreenMode60Hz,
+                mode),
             LaptopDisplayMode.Hz240Overdrive => StartDisplayCommand(
                 session,
-                DisplayCommand.ScreenMode240HzOverdrive),
+                DisplayCommand.ScreenMode240HzOverdrive,
+                mode),
             _ => LogUnknownDisplayMode(mode),
         };
     }
@@ -75,7 +84,10 @@ internal sealed class LaptopDisplayController
         return false;
     }
 
-    private bool StartDisplayCommand(InteractiveSession session, string screenMode)
+    private bool StartDisplayCommand(
+        InteractiveSession session,
+        string screenMode,
+        LaptopDisplayMode laptopDisplayMode)
     {
         var executablePath = ResolveCurrentExecutablePath();
         if (string.IsNullOrWhiteSpace(executablePath) || !File.Exists(executablePath))
@@ -99,7 +111,7 @@ internal sealed class LaptopDisplayController
 
         // Preserve the original behavior: refresh rate is changed in the user session, while overdrive is
         // also written immediately from Session 0 according to the requested mode/current power source.
-        ApplyOverdrive(_options.CurrentValue.LaptopDisplayMode);
+        ApplyOverdrive(laptopDisplayMode);
         return started;
     }
 

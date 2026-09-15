@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using AsusHardwareService.Asus.Display;
 using AsusHardwareService.Asus.Performance;
 using AsusHardwareService.Presentation.Osd;
 using static AsusHardwareService.Presentation.Osd.OsdNativeMethods;
@@ -12,6 +13,9 @@ internal static class SettingsFlyoutRenderer
     private const string IconFontFamily = "Segoe Fluent Icons";
     private const string BatteryGlyph = "\uE83F"; // Battery10
     private const string EcoGlyph = "\uE8BE"; // Leaf
+    private const string DisplayGlyph = "\uE7F4"; // TVMonitor
+    private const string AutoDisplayGlyph = "\uE895"; // Sync
+    private const string HighRefreshDisplayGlyph = "\uEC4A"; // SpeedHigh
     private const int ColorHighlightText = 14;
     // Segoe Fluent Icons is optically hinted at 20 DIP; avoid fractional/non-standard glyph sizes.
     private const double FluentIconFontSizeDip = 20.0;
@@ -165,6 +169,17 @@ internal static class SettingsFlyoutRenderer
         {
             DrawOperatingModeFocus(deviceContext, dpi, model.OperatingMode ?? OperatingModePreset.Normal);
         }
+
+        DrawLaptopDisplayModeTile(window, deviceContext, dpi, model, LaptopDisplayMode.Auto);
+        DrawLaptopDisplayModeTile(window, deviceContext, dpi, model, LaptopDisplayMode.Hz60);
+        DrawLaptopDisplayModeTile(window, deviceContext, dpi, model, LaptopDisplayMode.Hz240Overdrive);
+
+        if (model.ShowFocusVisual &&
+            model.IsAvailable &&
+            model.FocusedControl == SettingsFlyoutFocusedControl.LaptopDisplayMode)
+        {
+            DrawLaptopDisplayModeFocus(deviceContext, dpi, model.LaptopDisplayMode);
+        }
     }
 
     private static void DrawForeground(
@@ -227,6 +242,27 @@ internal static class SettingsFlyoutRenderer
         DrawOperatingModeLabel(window, deviceContext, dpi, model, OperatingModePreset.Normal, "Balanced");
         DrawOperatingModeLabel(window, deviceContext, dpi, model, OperatingModePreset.Turbo, "Turbo");
 
+        DrawTextOnSurface(
+            window,
+            deviceContext,
+            dpi,
+            "Laptop screen",
+            SettingsFlyoutLayout.LaptopDisplayModeTitleRect,
+            400,
+            14,
+            DtLeft,
+            primary);
+
+        DrawLaptopDisplayModeLabel(window, deviceContext, dpi, model, LaptopDisplayMode.Auto, "Auto");
+        DrawLaptopDisplayModeLabel(window, deviceContext, dpi, model, LaptopDisplayMode.Hz60, "60 Hz");
+        DrawLaptopDisplayModeLabel(
+            window,
+            deviceContext,
+            dpi,
+            model,
+            LaptopDisplayMode.Hz240Overdrive,
+            "240 Hz + OD");
+
         // Normal operation is intentionally silent, like Quick Settings. Only exceptional
         // states use the small secondary line; there is no instructional or success copy.
         if (!string.IsNullOrWhiteSpace(model.StatusText))
@@ -254,6 +290,10 @@ internal static class SettingsFlyoutRenderer
             IsVisible(paintDc, OsdLayout.ToPixels(SettingsFlyoutLayout.EcoLabelRect, dpi)) ||
             IsVisible(paintDc, OsdLayout.ToPixels(SettingsFlyoutLayout.BalancedLabelRect, dpi)) ||
             IsVisible(paintDc, OsdLayout.ToPixels(SettingsFlyoutLayout.TurboLabelRect, dpi)) ||
+            IsVisible(paintDc, OsdLayout.ToPixels(SettingsFlyoutLayout.LaptopDisplayModeTitleRect, dpi)) ||
+            IsVisible(paintDc, OsdLayout.ToPixels(SettingsFlyoutLayout.DisplayAutoLabelRect, dpi)) ||
+            IsVisible(paintDc, OsdLayout.ToPixels(SettingsFlyoutLayout.Display60LabelRect, dpi)) ||
+            IsVisible(paintDc, OsdLayout.ToPixels(SettingsFlyoutLayout.Display240LabelRect, dpi)) ||
             IsVisible(paintDc, OsdLayout.ToPixels(SettingsFlyoutLayout.StatusRect, dpi));
     }
 
@@ -429,6 +469,67 @@ internal static class SettingsFlyoutRenderer
             IconFontFamily);
     }
 
+    private static void DrawLaptopDisplayModeTile(
+        IntPtr window,
+        IntPtr deviceContext,
+        uint dpi,
+        SettingsFlyoutViewModel model,
+        LaptopDisplayMode laptopDisplayMode)
+    {
+        var rect = OsdLayout.ToPixels(SettingsFlyoutLayout.GetLaptopDisplayModeRect(laptopDisplayMode), dpi);
+        var selected = model.LaptopDisplayMode == laptopDisplayMode;
+        var hovered = model.HoveredLaptopDisplayMode == laptopDisplayMode;
+        var pressed = model.PressedLaptopDisplayMode == laptopDisplayMode && hovered;
+        DrawOperatingModeSurface(
+            deviceContext,
+            dpi,
+            rect,
+            selected,
+            hovered,
+            pressed,
+            model.IsAvailable);
+
+        var glyph = laptopDisplayMode switch
+        {
+            LaptopDisplayMode.Auto => AutoDisplayGlyph,
+            LaptopDisplayMode.Hz240Overdrive => HighRefreshDisplayGlyph,
+            _ => DisplayGlyph
+        };
+
+        DrawControlText(
+            window,
+            deviceContext,
+            dpi,
+            glyph,
+            SettingsFlyoutLayout.GetLaptopDisplayModeRect(laptopDisplayMode),
+            400,
+            FluentIconFontSizeDip,
+            DtCenter,
+            GetOperatingModeGlyphColor(selected, pressed, model.IsAvailable),
+            IconFontFamily
+        );
+    }
+
+    private static void DrawLaptopDisplayModeLabel(
+        IntPtr window,
+        IntPtr deviceContext,
+        uint dpi,
+        SettingsFlyoutViewModel model,
+        LaptopDisplayMode laptopDisplayMode,
+        string label)
+    {
+        DrawTextOnSurface(
+            window,
+            deviceContext,
+            dpi,
+            label,
+            SettingsFlyoutLayout.GetLaptopDisplayModeLabelRect(laptopDisplayMode),
+            400,
+            12,
+            DtCenter,
+            model.IsAvailable ? OsdTheme.GetPrimaryTextColor() : OsdTheme.GetSecondaryTextColor());
+    }
+
     private static void DrawOperatingModeLabel(
         IntPtr window,
         IntPtr deviceContext,
@@ -447,6 +548,23 @@ internal static class SettingsFlyoutRenderer
             12,
             DtCenter,
             model.IsAvailable ? OsdTheme.GetPrimaryTextColor() : OsdTheme.GetSecondaryTextColor());
+    }
+
+    private static void DrawLaptopDisplayModeFocus(
+        IntPtr deviceContext,
+        uint dpi,
+        LaptopDisplayMode laptopDisplayMode)
+    {
+        var rect = OsdLayout.ToPixels(SettingsFlyoutLayout.GetLaptopDisplayModeRect(laptopDisplayMode), dpi);
+        var inset = DipToPx(2.0, dpi);
+        DrawFocusOutline(
+            deviceContext,
+            rect.Left + inset,
+            rect.Top + inset,
+            rect.Right - inset,
+            rect.Bottom - inset,
+            Math.Max(1, DipToPx(8.0, dpi)),
+            dpi);
     }
 
     private static void DrawSliderFocus(
