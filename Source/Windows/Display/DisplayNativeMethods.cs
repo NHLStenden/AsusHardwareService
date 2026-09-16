@@ -155,20 +155,44 @@ internal static class DisplayNativeMethods
     /// <returns>The maximum refresh rate, or <c>-1</c> when unavailable.</returns>
     public static int GetMaxRefreshRate(string? deviceName)
     {
+        var refreshRates = GetRefreshRates(deviceName);
+        return refreshRates.Count == 0 ? -1 : refreshRates.Max();
+    }
+
+    /// <summary>
+    /// Gets the advertised refresh rates for the current resolution of a Windows display device.
+    /// </summary>
+    /// <param name="deviceName">The Windows display device name.</param>
+    /// <returns>The distinct supported refresh rates in ascending order.</returns>
+    public static IReadOnlyCollection<int> GetRefreshRates(string? deviceName)
+    {
         if (string.IsNullOrWhiteSpace(deviceName))
         {
-            return -1;
+            return Array.Empty<int>();
         }
 
-        var max = -1;
+        var currentMode = DevMode.Create();
+        if (!EnumDisplaySettings(deviceName, EnumCurrentSettings, ref currentMode))
+        {
+            return Array.Empty<int>();
+        }
+
+        var rates = new HashSet<int>();
         var mode = DevMode.Create();
         for (var index = 0; EnumDisplaySettings(deviceName, index, ref mode); index++)
         {
-            max = Math.Max(max, (int)mode.dmDisplayFrequency);
+            if (mode.dmPelsWidth == currentMode.dmPelsWidth &&
+                mode.dmPelsHeight == currentMode.dmPelsHeight &&
+                mode.dmBitsPerPel == currentMode.dmBitsPerPel &&
+                mode.dmDisplayFrequency > 0)
+            {
+                rates.Add((int)mode.dmDisplayFrequency);
+            }
+
             mode = DevMode.Create();
         }
 
-        return max;
+        return rates.OrderBy(rate => rate).ToArray();
     }
     /// <summary>
     /// Sets the refresh rate for a Windows display device.
@@ -251,23 +275,6 @@ internal static class DisplayNativeMethods
             adapter = DisplayDevice.Create();
         }
     }
-    private static HashSet<int> GetRefreshRates(string deviceName)
-    {
-        var rates = new HashSet<int>();
-        var mode = DevMode.Create();
-
-        for (var index = 0; EnumDisplaySettings(deviceName, index, ref mode); index++)
-        {
-            if (mode.dmDisplayFrequency > 0)
-            {
-                rates.Add((int)mode.dmDisplayFrequency);
-            }
-
-            mode = DevMode.Create();
-        }
-
-        return rates;
-    }
     private sealed record DisplayCandidate(
         uint DeviceIndex,
         string DeviceName,
@@ -276,7 +283,7 @@ internal static class DisplayNativeMethods
         string MonitorId,
         bool Active,
         bool Attached,
-        HashSet<int> RefreshRates,
+        IReadOnlyCollection<int> RefreshRates,
         int MaxRefreshRate,
         bool IsInternalLike)
     {

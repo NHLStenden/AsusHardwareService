@@ -30,10 +30,13 @@ internal static class DisplayCommand
     /// Screen mode that requests 60 Hz.
     /// </summary>
     public const string ScreenMode60Hz = "60";
-    /// <summary>
-    /// Screen mode that requests 240 Hz and asks the service to use overdrive.
-    /// </summary>
+
+    /// <summary>Screen mode that requests the maximum supported refresh rate with overdrive.</summary>
+    public const string ScreenModeMaxRefreshOverdrive = "max-od";
+
+    /// <summary>Legacy alias for the maximum-refresh-rate overdrive mode.</summary>
     public const string ScreenMode240HzOverdrive = "240-od";
+
     /// <summary>
     /// Tries to handle the supplied process arguments as a display command.
     /// </summary>
@@ -51,6 +54,7 @@ internal static class DisplayCommand
         exitCode = Run(args[1..]);
         return true;
     }
+
     /// <summary>
     /// Runs a display command.
     /// </summary>
@@ -65,6 +69,7 @@ internal static class DisplayCommand
                 WriteUsage();
                 return 2;
             }
+
             return args[0].ToLowerInvariant() switch
             {
                 ScreenCommandName => ApplyScreen(args),
@@ -79,6 +84,7 @@ internal static class DisplayCommand
             return 1;
         }
     }
+
     private static int ApplyScreen(string[] args)
     {
         if (args.Length < 2)
@@ -89,20 +95,21 @@ internal static class DisplayCommand
         }
 
         var mode = args[1].ToLowerInvariant();
-        var targetHz = mode switch
-        {
-            ScreenModeAuto => PowerStatus.IsOnAcPower() ? 240 : 60,
-            ScreenMode60Hz => 60,
-            ScreenMode240HzOverdrive => 240,
-            _ => -1,
-        };
-        if (targetHz < 0)
+        var validMode = mode == ScreenModeAuto ||
+            mode == ScreenMode60Hz ||
+            mode == ScreenModeMaxRefreshOverdrive ||
+            mode == ScreenMode240HzOverdrive;
+        if (!validMode)
         {
             Console.Error.WriteLine($"Unknown screen mode: {args[1]}");
             WriteUsage();
             return 2;
         }
-        var display = DisplayNativeMethods.FindLaptopScreen(requireActive: true, preferredRefreshRate: targetHz);
+
+        var prefers60Hz = mode == ScreenMode60Hz || (mode == ScreenModeAuto && !PowerStatus.IsOnAcPower());
+        var display = DisplayNativeMethods.FindLaptopScreen(
+            requireActive: true,
+            preferredRefreshRate: prefers60Hz ? 60 : null);
         if (display is null)
         {
             Console.Error.WriteLine("No display candidates found in interactive session.");
@@ -113,6 +120,21 @@ internal static class DisplayCommand
 
             return 3;
         }
+
+        var refreshRates = DisplayNativeMethods.GetRefreshRates(display);
+        if (refreshRates.Count == 0)
+        {
+            Console.Error.WriteLine($"No refresh rates found for {display} at the current resolution.");
+            return 3;
+        }
+
+        var targetHz = ResolveTargetRefreshRate(mode, refreshRates);
+        if (targetHz < 0)
+        {
+            Console.Error.WriteLine($"Requested screen mode {args[1]} is not supported on {display}.");
+            return 4;
+        }
+
         var currentHz = DisplayNativeMethods.GetRefreshRate(display);
         if (currentHz == targetHz)
         {
@@ -124,6 +146,21 @@ internal static class DisplayCommand
         Console.WriteLine($"Refresh {currentHz} -> {targetHz} on {display}: {(changed ? "OK" : "Failed")}");
 
         return changed ? 0 : 4;
+    }
+
+    private static int ResolveTargetRefreshRate(string mode, IReadOnlyCollection<int> refreshRates)
+    {
+        if (mode == ScreenMode60Hz)
+        {
+            return refreshRates.Contains(60) ? 60 : -1;
+        }
+
+        if (mode == ScreenModeAuto && !PowerStatus.IsOnAcPower())
+        {
+            return refreshRates.Contains(60) ? 60 : refreshRates.Min();
+        }
+
+        return refreshRates.Max();
     }
 
     private static int ApplyTopology(string[] args)
@@ -167,12 +204,13 @@ internal static class DisplayCommand
         WriteUsage();
         return 2;
     }
+
     private static void WriteUsage()
     {
         Console.Error.WriteLine("Usage:");
         Console.Error.WriteLine("  AsusHardwareService.exe display screen auto");
         Console.Error.WriteLine("  AsusHardwareService.exe display screen 60");
-        Console.Error.WriteLine("  AsusHardwareService.exe display screen 240-od");
+        Console.Error.WriteLine("  AsusHardwareService.exe display screen max-od");
         Console.Error.WriteLine("  AsusHardwareService.exe display topology toggle");
         Console.Error.WriteLine("  AsusHardwareService.exe display dump");
     }

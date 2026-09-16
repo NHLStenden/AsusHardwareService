@@ -3,13 +3,13 @@ namespace AsusHardwareService.Asus.Display;
 /// <summary>Built-in laptop panel refresh-rate and overdrive presets.</summary>
 internal enum LaptopDisplayMode
 {
-    /// <summary>Uses 240 Hz/overdrive on AC power and 60 Hz/no overdrive on battery power.</summary>
+    /// <summary>Uses the maximum supported refresh rate/overdrive on AC power and 60 Hz/no overdrive on battery power.</summary>
     Auto,
 
     /// <summary>Uses 60 Hz with panel overdrive disabled.</summary>
     Hz60,
 
-    /// <summary>Uses 240 Hz with panel overdrive enabled.</summary>
+    /// <summary>Uses the maximum supported refresh rate with panel overdrive enabled. The member name is retained for settings compatibility.</summary>
     Hz240Overdrive,
 }
 

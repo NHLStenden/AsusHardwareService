@@ -1,3 +1,4 @@
+using AsusHardwareService.Asus;
 using AsusHardwareService.Asus.Display;
 using AsusHardwareService.Asus.Acpi;
 using AsusHardwareService.Asus.Battery;
@@ -43,7 +44,9 @@ builder.Services
     .Bind(builder.Configuration.GetSection(HardwareOptions.SectionName));
 
 // Use interfaces at presentation boundaries.
+builder.Services.AddSingleton<AsusPlatformIdentity>();
 builder.Services.AddSingleton<AsusAcpiClientFactory>();
+builder.Services.AddSingleton<AsusAcpiCapabilities>();
 builder.Services.AddSingleton<AsusHotkeyListener>();
 builder.Services.AddSingleton<AsusKeyboardBacklightWriter>();
 builder.Services.AddSingleton<BatteryChargeLimiter>();

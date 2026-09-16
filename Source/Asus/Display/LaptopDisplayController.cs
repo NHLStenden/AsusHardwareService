@@ -15,6 +15,7 @@ namespace AsusHardwareService.Asus.Display;
 internal sealed class LaptopDisplayController
 {
     private readonly AsusAcpiClientFactory _acpiFactory;
+    private readonly AsusAcpiCapabilities _capabilities;
     private readonly SessionProcessLauncher _processLauncher;
     private readonly ILogger<LaptopDisplayController> _logger;
     private readonly IOptionsMonitor<HardwareOptions> _options;
@@ -22,11 +23,13 @@ internal sealed class LaptopDisplayController
     /// <summary>Initializes a new instance of the <see cref="LaptopDisplayController"/> class.</summary>
     public LaptopDisplayController(
         AsusAcpiClientFactory acpiFactory,
+        AsusAcpiCapabilities capabilities,
         SessionProcessLauncher processLauncher,
         ILogger<LaptopDisplayController> logger,
         IOptionsMonitor<HardwareOptions> options)
     {
         _acpiFactory = acpiFactory ?? throw new ArgumentNullException(nameof(acpiFactory));
+        _capabilities = capabilities ?? throw new ArgumentNullException(nameof(capabilities));
         _processLauncher = processLauncher ?? throw new ArgumentNullException(nameof(processLauncher));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -72,7 +75,7 @@ internal sealed class LaptopDisplayController
                 mode),
             LaptopDisplayMode.Hz240Overdrive => StartDisplayCommand(
                 session,
-                DisplayCommand.ScreenMode240HzOverdrive,
+                DisplayCommand.ScreenModeMaxRefreshOverdrive,
                 mode),
             _ => LogUnknownDisplayMode(mode),
         };
@@ -116,6 +119,12 @@ internal sealed class LaptopDisplayController
 
     private void ApplyOverdrive(LaptopDisplayMode mode)
     {
+        if (!_capabilities.IsScreenOverdriveSupported())
+        {
+            _logger.LogDebug("ASUS panel overdrive is not supported on this platform.");
+            return;
+        }
+
         var overdrive = mode switch
         {
             LaptopDisplayMode.Auto => PowerStatus.IsOnAcPower() ? 1 : 0,
@@ -161,40 +170,43 @@ internal sealed class LaptopDisplayController
     /// <returns><see langword="true"/> when a supported firmware endpoint accepted the mode.</returns>
     public bool ApplyMiniLedMode(MiniLedMode mode)
     {
+        var endpoints = _capabilities.GetMiniLedEndpoints();
+        if (endpoints.Count == 0)
+        {
+            _logger.LogDebug("No readable ASUS MiniLED firmware endpoint was detected.");
+            return false;
+        }
+
         using var acpi = _acpiFactory.Open();
         if (!acpi.IsConnected)
         {
             return false;
         }
 
-        var threeStateValue = ToThreeStateMiniLedValue(mode);
-        if (TryWriteMiniLedEndpoint(
-                acpi,
-                AsusAcpiDeviceIds.MiniLedThreeState,
-                threeStateValue,
-                "MiniLED2",
-                mode,
-                sleepAfterWrite: true))
+        foreach (var endpoint in endpoints)
         {
-            return true;
-        }
+            var endpointValue = endpoint.Kind switch
+            {
+                AsusMiniLedEndpointKind.ThreeState => ToThreeStateMiniLedValue(mode),
+                _ => ToTwoStateMiniLedValue(mode),
+            };
 
-        if (mode == MiniLedMode.MultiZoneStrong)
-        {
-            _logger.LogWarning(
-                "MiniLED2 did not accept MultiZoneStrong. Falling back to the two-state MiniLED endpoint.");
-        }
+            if (mode == MiniLedMode.MultiZoneStrong && endpoint.Kind == AsusMiniLedEndpointKind.TwoState)
+            {
+                _logger.LogWarning(
+                    "Three-state MiniLED is unavailable. Falling back to normal multi-zone local dimming.");
+            }
 
-        var twoStateValue = ToTwoStateMiniLedValue(mode);
-        if (TryWriteMiniLedEndpoint(
-                acpi,
-                AsusAcpiDeviceIds.MiniLedTwoState,
-                twoStateValue,
-                "MiniLED1",
-                mode,
-                sleepAfterWrite: false))
-        {
-            return true;
+            if (TryWriteMiniLedEndpoint(
+                    acpi,
+                    endpoint.DeviceId,
+                    endpointValue,
+                    endpoint.DiagnosticName,
+                    mode,
+                    sleepAfterWrite: endpoint.Kind == AsusMiniLedEndpointKind.ThreeState))
+            {
+                return true;
+            }
         }
 
         _logger.LogWarning("No supported MiniLED ACPI endpoint accepted mode {Mode}.", mode);
@@ -262,6 +274,7 @@ internal sealed class LaptopDisplayController
             return false;
         }
     }
+
     private static string? ResolveCurrentExecutablePath() =>
         Environment.ProcessPath ?? System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
 

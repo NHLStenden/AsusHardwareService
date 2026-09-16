@@ -11,14 +11,17 @@ internal sealed class OperatingModeController
 {
     private readonly SemaphoreSlim _modeSwitchLock = new(1, 1);
     private readonly AsusAcpiClientFactory _acpiFactory;
+    private readonly AsusAcpiCapabilities _capabilities;
     private readonly ILogger<OperatingModeController> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="OperatingModeController"/> class.</summary>
     public OperatingModeController(
         AsusAcpiClientFactory acpiFactory,
+        AsusAcpiCapabilities capabilities,
         ILogger<OperatingModeController> logger)
     {
         _acpiFactory = acpiFactory ?? throw new ArgumentNullException(nameof(acpiFactory));
+        _capabilities = capabilities ?? throw new ArgumentNullException(nameof(capabilities));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -70,28 +73,86 @@ internal sealed class OperatingModeController
 
     private int ReadGpuEcoFlag()
     {
+        var endpoint = _capabilities.GetGpuEcoEndpoint();
+        if (!endpoint.HasValue)
+        {
+            return -1;
+        }
+
         using var acpi = _acpiFactory.Open();
-        return acpi.IsConnected ? acpi.ReadDeviceValue(AsusAcpiDeviceIds.GpuEco, "GpuEco") : -1;
+        return acpi.IsConnected ? acpi.ReadDeviceValue(endpoint.Value, "GpuEco") : -1;
     }
 
     private int ReadGpuMuxFlag()
     {
+        var endpoint = _capabilities.GetGpuMuxEndpoint();
+        if (!endpoint.HasValue)
+        {
+            return -1;
+        }
+
         using var acpi = _acpiFactory.Open();
-        return acpi.IsConnected ? acpi.ReadDeviceValue(AsusAcpiDeviceIds.GpuMux, "GpuMux") : -1;
+        return acpi.IsConnected ? acpi.ReadDeviceValue(endpoint.Value, "GpuMux") : -1;
     }
 
     private int WriteGpuEcoFlag(int ecoFlag)
     {
+        var endpoint = _capabilities.GetGpuEcoEndpoint();
+        if (!endpoint.HasValue)
+        {
+            return -1;
+        }
+
         using var acpi = _acpiFactory.Open();
-        return acpi.IsConnected ? acpi.WriteDeviceValue(AsusAcpiDeviceIds.GpuEco, ecoFlag, "GpuEco") : -1;
+        return acpi.IsConnected ? acpi.WriteDeviceValue(endpoint.Value, ecoFlag, "GpuEco") : -1;
     }
 
     private int WritePerformanceMode(PerformanceMode mode)
     {
         using var acpi = _acpiFactory.Open();
-        return acpi.IsConnected
-            ? acpi.WriteDeviceValue(AsusAcpiDeviceIds.PerformanceMode, (int)mode, nameof(PerformanceMode))
-            : -1;
+        if (!acpi.IsConnected)
+        {
+            return -1;
+        }
+
+        var endpoint = _capabilities.GetPerformanceModeEndpoint();
+        if (endpoint.HasValue)
+        {
+            return acpi.WriteDeviceValue(
+                endpoint.Value.DeviceId,
+                ToFirmwarePerformanceMode(mode, endpoint.Value.SwapsTurboAndSilent),
+                endpoint.Value.DiagnosticName);
+        }
+
+        // Preserve the original ROG write path for firmware that does not expose readable capability state.
+        var result = acpi.WriteDeviceValue(
+            AsusAcpiDeviceIds.PerformanceMode,
+            (int)mode,
+            nameof(PerformanceMode));
+        if (result == 1)
+        {
+            return result;
+        }
+
+        return acpi.WriteDeviceValue(
+            AsusAcpiDeviceIds.PerformanceModeVivoBook,
+            ToFirmwarePerformanceMode(mode, swapsTurboAndSilent: true),
+            "VivoBookPerformanceMode");
+    }
+
+    private static int ToFirmwarePerformanceMode(PerformanceMode mode, bool swapsTurboAndSilent)
+    {
+        if (!swapsTurboAndSilent)
+        {
+            return (int)mode;
+        }
+
+        return mode switch
+        {
+            PerformanceMode.Turbo => (int)PerformanceMode.Silent,
+            PerformanceMode.Silent => (int)PerformanceMode.Turbo,
+            _ => (int)mode,
+        };
     }
 
     private async Task<GpuModeChangeResult> SetGpuModeAsync(GpuMode targetMode, CancellationToken cancellationToken)
@@ -142,7 +203,7 @@ internal sealed class OperatingModeController
         return CurrentMode.Gpu;
     }
 
-    private bool HasGpuModeSupport() => ReadGpuEcoFlag() >= 0;
+    private bool HasGpuModeSupport() => _capabilities.GetGpuEcoEndpoint().HasValue;
 
     // eGPU detection is not currently implemented.
     private static bool IsExternalGpuConnected() => false;

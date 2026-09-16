@@ -301,7 +301,7 @@ internal static class SettingsFlyoutRenderer
             dpi,
             model,
             LaptopDisplayMode.Hz240Overdrive,
-            "240 Hz + OD");
+            "Max Hz + OD");
 
         DrawTextOnSurface(
             window,
