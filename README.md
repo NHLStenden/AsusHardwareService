@@ -2,7 +2,7 @@
 
 A lightweight Windows service for ASUS laptops that applies a battery charge limit, listens for ASUS hotkey events, adjusts display and keyboard backlight brightness, sets ASUS Splendid color settings, toggles microphone mute, switches between performance modes, and applies selected laptop display settings.
 
-![ASUS Hardware Service screenshot](Images/Screenshot.png)
+![ASUS Hardware Service screenshot](docs/images/Screenshot.png)
 
 ## What it does
 
