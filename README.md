@@ -33,9 +33,9 @@ After publishing, install the executable with `sc.exe` and start the service.
 Replace `AsusHardwareService.exe` below with the actual published executable name from your project.
 
 ```powershell
-sc.exe create "ASUS Hardware Service" binPath= "C:\Path\To\AsusHardwareService.exe" start= auto
-sc.exe config "ASUS Hardware Service" DisplayName= "ASUS Hardware Service"
-sc.exe start "ASUS Hardware Service"
+sc.exe create "AsusHardwareService" binPath= "C:\Path\To\AsusHardwareService.exe" start= auto
+sc.exe config "AsusHardwareService" DisplayName= "ASUS Hardware Service"
+sc.exe start "AsusHardwareService"
 ```
 # Contributing
 

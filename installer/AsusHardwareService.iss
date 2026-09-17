@@ -1,5 +1,5 @@
 #define AppName "ASUS Hardware Service"
-#define AppPublisher "AsusHardwareService contributors"
+#define AppPublisher "NHL Stenden"
 #define AppExeName "AsusHardwareService.exe"
 #define ServiceName "AsusHardwareService"
 #define ServiceDisplayName "ASUS Hardware Service"
