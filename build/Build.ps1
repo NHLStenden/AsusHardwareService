@@ -31,12 +31,21 @@ function Get-ProjectVersion {
 }
 
 function Find-InnoCompiler {
+    # Prefer anything already available on PATH.
+    $command = Get-Command 'iscc.exe' -ErrorAction SilentlyContinue
+    if ($command) {
+        return $command.Source
+    }
+
+    # Fall back to conventional Inno Setup installation locations.
     $candidates = @(
-        (Join-Path $env:ProgramFiles 'Inno Setup 7/ISCC.exe'),
-        (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 7/ISCC.exe'),
-        (Join-Path $env:ProgramFiles 'Inno Setup 6/ISCC.exe'),
-        (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe')
-    ) | Where-Object { $_ -and (Test-Path $_) }
+        (Join-Path $env:ProgramFiles 'Inno Setup 7\ISCC.exe'),
+        (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 7\ISCC.exe'),
+        (Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe'),
+        (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe')
+    ) | Where-Object {
+        $_ -and (Test-Path $_)
+    }
 
     return $candidates | Select-Object -First 1
 }
@@ -77,9 +86,9 @@ New-Item -ItemType Directory -Force -Path $installerDir | Out-Null
 
 Write-Host "Building Inno Setup installer with $iscc..."
 & $iscc `
-    "--define=AppVersion=$version" `
-    "--define=PublishDir=$publishDir" `
-    "--output-dir=$installerDir" `
+    "-dAppVersion=$version" `
+    "-dPublishDir=$publishDir" `
+    "-o$installerDir" `
     $installerScript
 
 if ($LASTEXITCODE -ne 0) {
