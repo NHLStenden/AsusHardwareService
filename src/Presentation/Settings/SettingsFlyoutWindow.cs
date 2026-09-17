@@ -4,7 +4,7 @@ using AsusHardwareService.Asus.Display;
 using AsusHardwareService.Asus.Performance;
 using AsusHardwareService.Asus.Splendid;
 using AsusHardwareService.Presentation.Osd;
-using AsusHardwareService.Settings;
+using AsusHardwareService.Ipc;
 using static AsusHardwareService.Presentation.Osd.OsdNativeMethods;
 
 namespace AsusHardwareService.Presentation.Settings;

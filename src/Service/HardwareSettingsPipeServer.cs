@@ -3,7 +3,7 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
-using AsusHardwareService.Settings;
+using AsusHardwareService.Ipc;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 

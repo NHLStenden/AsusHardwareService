@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Validate tag matches project version
+        shell: pwsh
+        run: |
+          $version = (& dotnet msbuild AsusHardwareService.csproj -nologo -getProperty:VersionPrefix | Select-Object -Last 1).Trim()
+          $expectedTag = "v$version"
+          if ($env:GITHUB_REF_NAME -ne $expectedTag) {
+            throw "Release tag '$env:GITHUB_REF_NAME' does not match Directory.Build.props version '$expectedTag'."
+          }
+          "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --version=6.7.1 --yes --no-progress
+
+      - name: Build application and installer
+        shell: pwsh
+        run: ./build/Build.ps1 -Installer
+
+      - name: Upload installer workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: AsusHardwareService-${{ env.APP_VERSION }}-installer
+          path: |
+            artifacts/installer/*.exe
+            artifacts/installer/*.sha256
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = Get-ChildItem artifacts/installer/* | Where-Object { $_.Extension -in '.exe', '.sha256' }
+          gh release create $env:GITHUB_REF_NAME $assets.FullName --generate-notes --verify-tag --title "ASUS Hardware Service $env:APP_VERSION"

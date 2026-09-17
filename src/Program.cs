@@ -7,6 +7,7 @@ using AsusHardwareService.Asus.Keyboard;
 using AsusHardwareService.Asus.Performance;
 using AsusHardwareService.Asus.Splendid;
 using AsusHardwareService.Configuration;
+using AsusHardwareService.Diagnostics;
 using AsusHardwareService.Presentation;
 using AsusHardwareService.Presentation.Osd;
 using AsusHardwareService.Service;
@@ -15,6 +16,11 @@ using AsusHardwareService.Windows.Display;
 using AsusHardwareService.Windows.Processes;
 using AsusHardwareService.Windows.Sessions;
 using Microsoft.Extensions.Logging.EventLog;
+
+if (VersionCommand.TryHandle(args, out var versionExitCode))
+{
+    return versionExitCode;
+}
 
 if (OsdCommand.TryHandle(args, out var osdExitCode))
 {
@@ -28,13 +34,24 @@ if (DisplayCommand.TryHandle(args, out var displayExitCode))
 
 var builder = Host.CreateApplicationBuilder(args);
 
-builder.Services.AddWindowsService(options => options.ServiceName = "ASUS Hardware Service");
+var applicationPaths = ApplicationPaths.Create(builder.Environment.ContentRootPath);
+if (!Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "appsettings.json"))
+        .Equals(Path.GetFullPath(applicationPaths.SettingsPath), StringComparison.OrdinalIgnoreCase))
+{
+    // Host defaults already load the repository-local appsettings.json. Installed builds keep
+    // mutable machine settings in ProgramData so upgrades can replace Program Files safely.
+    builder.Configuration.AddJsonFile(applicationPaths.SettingsPath, optional: true, reloadOnChange: true);
+}
+
+builder.Services.AddSingleton(applicationPaths);
+
+builder.Services.AddWindowsService(options => options.ServiceName = AsusHardwareService.ApplicationIdentity.ServiceName);
 
 builder.Logging.ClearProviders();
 builder.Logging.AddEventLog(settings =>
 {
     settings.LogName = "Application";
-    settings.SourceName = "ASUS Hardware Service";
+    settings.SourceName = AsusHardwareService.ApplicationIdentity.EventLogSourceName;
 });
 builder.Logging.SetMinimumLevel(LogLevel.Information);
 builder.Logging.AddFilter<EventLogLoggerProvider>(level => level >= LogLevel.Warning);

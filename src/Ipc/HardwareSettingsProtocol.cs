@@ -4,7 +4,7 @@ using AsusHardwareService.Asus.Display;
 using AsusHardwareService.Asus.Performance;
 using AsusHardwareService.Asus.Splendid;
 
-namespace AsusHardwareService.Settings;
+namespace AsusHardwareService.Ipc;
 
 /// <summary>Identifies an operation in the hardware-settings protocol.</summary>
 internal enum HardwareSettingsOperation

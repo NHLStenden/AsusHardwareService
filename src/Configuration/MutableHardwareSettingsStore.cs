@@ -2,31 +2,28 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using AsusHardwareService.Asus.Display;
 using AsusHardwareService.Asus.Performance;
-using AsusHardwareService.Settings;
-using Microsoft.Extensions.Hosting;
+using AsusHardwareService.Ipc;
 using Microsoft.Extensions.Logging;
 
 namespace AsusHardwareService.Configuration;
 
-/// <summary>Persists hardware settings in the application's existing appsettings.json file.</summary>
+/// <summary>Persists hardware settings in the resolved machine or development settings file.</summary>
 internal sealed class MutableHardwareSettingsStore
 {
-    private const string SettingsFileName = "appsettings.json";
-
     private readonly ILogger<MutableHardwareSettingsStore> _logger;
     private readonly string _settingsPath;
 
     /// <summary>Initializes a new instance of the <see cref="MutableHardwareSettingsStore"/> class.</summary>
     public MutableHardwareSettingsStore(
         ILogger<MutableHardwareSettingsStore> logger,
-        IHostEnvironment environment)
+        ApplicationPaths applicationPaths)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        ArgumentNullException.ThrowIfNull(environment);
-        _settingsPath = Path.Combine(environment.ContentRootPath, SettingsFileName);
+        ArgumentNullException.ThrowIfNull(applicationPaths);
+        _settingsPath = applicationPaths.SettingsPath;
     }
 
-    /// <summary>Atomically applies a partial hardware-settings update to appsettings.json.</summary>
+    /// <summary>Atomically applies a partial hardware-settings update to the active settings file.</summary>
     /// <param name="patch">The settings properties to update.</param>
     /// <param name="cancellationToken">Cancels the file operation.</param>
     /// <returns>A task that completes after appsettings.json has been replaced.</returns>
@@ -84,6 +81,12 @@ internal sealed class MutableHardwareSettingsStore
         }
 
         var json = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine;
+        var settingsDirectory = Path.GetDirectoryName(_settingsPath);
+        if (!string.IsNullOrWhiteSpace(settingsDirectory))
+        {
+            Directory.CreateDirectory(settingsDirectory);
+        }
+
         var temporaryPath = _settingsPath + ".tmp";
         try
         {

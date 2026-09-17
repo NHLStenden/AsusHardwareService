@@ -1,6 +1,6 @@
 using System.IO.Pipes;
 using System.Text.Json;
-using AsusHardwareService.Settings;
+using AsusHardwareService.Ipc;
 
 namespace AsusHardwareService.Presentation.Settings;
 

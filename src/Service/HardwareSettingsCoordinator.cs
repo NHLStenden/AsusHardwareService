@@ -3,7 +3,7 @@ using AsusHardwareService.Asus.Display;
 using AsusHardwareService.Asus.Performance;
 using AsusHardwareService.Asus.Splendid;
 using AsusHardwareService.Configuration;
-using AsusHardwareService.Settings;
+using AsusHardwareService.Ipc;
 using AsusHardwareService.Windows.Sessions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;

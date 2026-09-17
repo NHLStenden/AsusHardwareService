@@ -9,7 +9,7 @@ internal static class OsdNativeMethods
 {
     internal const string WindowClassName = "AsusHardwareService.OsdWindow";
     internal const string InstanceMutexName = @"Local\AsusHardwareService.OnScreenDisplay";
-    internal const string ServiceName = "ASUS Hardware Service";
+    internal const string ServiceName = ApplicationIdentity.ServiceName;
     internal const string PersonalizeRegistryPath = @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
     internal const string SystemUsesLightThemeRegistryValue = "SystemUsesLightTheme";
     internal const string IndicatorPositionRegistryPath = @"Software\Microsoft\Windows\CurrentVersion\SystemSettings\ConfirmatorPosition";
